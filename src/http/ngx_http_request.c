@@ -63,6 +63,10 @@ static u_char *ngx_http_log_error_handler(ngx_http_request_t *r,
 static void ngx_http_ssl_handshake(ngx_event_t *rev);
 static void ngx_http_ssl_handshake_handler(ngx_connection_t *c);
 #endif
+#if (NGX_HTTP_TLS)
+static void ngx_http_tls_handshake(ngx_event_t *rev);
+static void ngx_http_tls_handshake_handler(ngx_connection_t *c);
+#endif
 
 
 static char *ngx_http_client_errors[] = {
@@ -341,6 +345,19 @@ ngx_http_init_connection(ngx_connection_t *c)
         hc->ssl = 1;
         c->log->action = "SSL handshaking";
         rev->handler = ngx_http_ssl_handshake;
+    }
+    }
+#endif
+#if (NGX_HTTP_TLS)
+    {
+    ngx_http_tls_srv_conf_t *tscf;
+    tscf = ngx_http_get_module_srv_conf(hc->conf_ctx, ngx_http_tls_module);
+    if (tscf->enable) {
+        hc->tls = 1;
+        c->log->action = "TLS handshaking";
+        rev->handler = ngx_http_tls_handshake;
+    } else {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0, "tls was not enabled");
     }
     }
 #endif
@@ -637,6 +654,187 @@ ngx_http_alloc_request(ngx_connection_t *c)
     return r;
 }
 
+#if (NGX_HTTP_TLS)
+static void
+ngx_http_tls_handshake(ngx_event_t *rev)
+{
+    u_char                    *p, buf[NGX_PROXY_PROTOCOL_MAX_HEADER + 1];
+    size_t                     size;
+    ssize_t                    n;
+    ngx_err_t                  err;
+    ngx_int_t                  rc;
+    ngx_connection_t          *c;
+    ngx_http_connection_t     *hc;
+    ngx_http_tls_srv_conf_t   *tscf;
+    ngx_http_core_loc_conf_t  *clcf;
+    ngx_http_core_srv_conf_t  *cscf;
+
+    c = rev->data;
+    hc = c->data;
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
+                   "http check tls handshake");
+
+    if (rev->timedout) {
+        ngx_log_error(NGX_LOG_INFO, c->log, NGX_ETIMEDOUT, "client timed out");
+        ngx_http_close_connection(c);
+        return;
+    }
+
+    if (c->close) {
+        ngx_http_close_connection(c);
+        return;
+    }
+
+    size = hc->proxy_protocol ? sizeof(buf) : 1;
+    n = recv(c->fd, (char *) buf, size, MSG_PEEK);
+    err = ngx_socket_errno;
+
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, rev->log, 0, "http recv(): %z", n);
+
+    if (n == -1) {
+        if (err == NGX_EAGAIN) {
+            rev->ready = 0;
+
+            if (!rev->timer_set) {
+                cscf = ngx_http_get_module_srv_conf(hc->conf_ctx,
+                                                    ngx_http_core_module);
+                ngx_add_timer(rev, cscf->client_header_timeout);
+                ngx_reusable_connection(c, 1);
+            }
+
+            if (ngx_handle_read_event(rev, 0) != NGX_OK) {
+                ngx_http_close_connection(c);
+            }
+
+            return;
+        }
+
+        ngx_connection_error(c, err, "recv() failed");
+        ngx_http_close_connection(c);
+
+        return;
+    }
+
+    if (hc->proxy_protocol) {
+        hc->proxy_protocol = 0;
+
+        p = ngx_proxy_protocol_read(c, buf, buf + n);
+
+        if (p == NULL) {
+            ngx_http_close_connection(c);
+            return;
+        }
+
+        size = p - buf;
+
+        if (c->recv(c, buf, size) != (ssize_t) size) {
+            ngx_http_close_connection(c);
+            return;
+        }
+
+        c->log->action = "TLS handshaking";
+
+        if (n == (ssize_t) size) {
+            ngx_post_event(rev, &ngx_posted_events);
+            return;
+        }
+
+        n = 1;
+        buf[0] = *p;
+    }
+
+    if (n == 1) {
+        if (buf[0] & 0x80 /* SSLv2 */ || buf[0] == 0x16 /* SSLv3/TLSv1 */) {
+            ngx_log_debug1(NGX_LOG_DEBUG_HTTP, rev->log, 0,
+                           "https tls handshake: 0x%02Xd", buf[0]);
+
+            clcf = ngx_http_get_module_loc_conf(hc->conf_ctx,
+                                                ngx_http_core_module);
+
+            if (clcf->tcp_nodelay && ngx_tcp_nodelay(c) != NGX_OK) {
+                ngx_http_close_connection(c);
+                return;
+            }
+
+            tscf = ngx_http_get_module_srv_conf(hc->conf_ctx,
+                                                ngx_http_tls_module);
+
+            if (ngx_tls_create_connection(&tscf->tls, c) != NGX_OK)
+            {
+                ngx_http_close_connection(c);
+                return;
+            }
+
+            ngx_reusable_connection(c, 0);
+
+            rc = ngx_tls_handshake(c);
+
+            if (rc == NGX_AGAIN) {
+
+                if (!rev->timer_set) {
+                    cscf = ngx_http_get_module_srv_conf(hc->conf_ctx,
+                                                        ngx_http_core_module);
+                    ngx_add_timer(rev, cscf->client_header_timeout);
+                }
+
+                c->tls->handler = ngx_http_tls_handshake_handler;
+                return;
+            }
+
+            ngx_http_tls_handshake_handler(c);
+
+            return;
+        }
+
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0, "plain http");
+
+        c->log->action = "waiting for request";
+
+        rev->handler = ngx_http_wait_request_handler;
+        ngx_http_wait_request_handler(rev);
+
+        return;
+    }
+
+    ngx_log_error(NGX_LOG_INFO, c->log, 0, "client closed connection");
+    ngx_http_close_connection(c);
+}
+
+static void
+ngx_http_tls_handshake_handler(ngx_connection_t *c)
+{
+    if (c->tls->handshaked) {
+
+        /*
+         * The majority of browsers do not send the "close notify" alert.
+         * Among them are MSIE, old Mozilla, Netscape 4, Konqueror,
+         * and Links.  And what is more, MSIE ignores the server's alert.
+         *
+         * Opera and recent Mozilla send the alert.
+         */
+
+        c->tls->no_wait_shutdown = 1;
+
+        c->log->action = "waiting for request";
+
+        c->read->handler = ngx_http_wait_request_handler;
+        /* STUB: epoll edge */ c->write->handler = ngx_http_empty_handler;
+
+        ngx_reusable_connection(c, 1);
+
+        ngx_http_wait_request_handler(c->read);
+
+        return;
+    }
+
+    if (c->read->timedout) {
+        ngx_log_error(NGX_LOG_INFO, c->log, NGX_ETIMEDOUT, "client timed out");
+    }
+
+    ngx_http_close_connection(c);
+}
+#endif // NGX_HTTP_TLS
 
 #if (NGX_HTTP_SSL)
 

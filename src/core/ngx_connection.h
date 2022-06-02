@@ -150,6 +150,9 @@ struct ngx_connection_s {
 #if (NGX_SSL || NGX_COMPAT)
     ngx_ssl_connection_t  *ssl;
 #endif
+#if (NGX_TLS)
+    ngx_tls_connection_t  *tls;
+#endif
 
     ngx_udp_connection_t  *udp;
 

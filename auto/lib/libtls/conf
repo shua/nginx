@@ -1,0 +1,25 @@
+
+    ngx_feature="libtls library"
+    ngx_feature_name="NGX_TLS"
+    ngx_feature_run=no
+    ngx_feature_incs="#include <tls.h>"
+    ngx_feature_path=
+    ngx_feature_libs="-ltls"
+    ngx_feature_test="tls_server()"
+    . auto/feature
+
+if [ $ngx_found = yes ]; then
+    have=NGX_TLS . auto/have
+    CORE_INCS="$CORE_INCS $ngx_feature_path"
+    CORE_LIBS="$CORE_LIBS $ngx_feature_libs"
+    LIBTLS=YES
+else
+
+cat << END
+
+$0: error: TLS modules require the libtls library.
+
+END
+    exit 1
+fi
+
