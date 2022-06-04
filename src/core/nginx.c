@@ -237,7 +237,7 @@ main(int argc, char *const *argv)
     }
 
     /* STUB */
-#if (NGX_OPENSSL)
+#if (NGX_SSL)
     ngx_ssl_init(log);
 #endif
 
@@ -390,6 +390,10 @@ main(int argc, char *const *argv)
 static void
 ngx_show_version_info(void)
 {
+#if (NGX_LIBTLS)
+    char tlsapi[17] = {0};
+#endif
+
     ngx_write_stderr("nginx version: " NGINX_VER_BUILD NGX_LINEFEED);
 
     if (ngx_show_help) {
@@ -435,14 +439,18 @@ ngx_show_version_info(void)
 #endif
 
 #if (NGX_SSL)
-        if (ngx_strcmp(ngx_ssl_version(), OPENSSL_VERSION_TEXT) == 0) {
-            ngx_write_stderr("built with " OPENSSL_VERSION_TEXT NGX_LINEFEED);
-        } else {
-            ngx_write_stderr("built with " OPENSSL_VERSION_TEXT
-                             " (running with ");
-            ngx_write_stderr((char *) (uintptr_t) ngx_ssl_version());
-            ngx_write_stderr(")" NGX_LINEFEED);
-        }
+#if (NGX_OPENSSL)
+        ngx_write_stderr("built with " OPENSSL_VERSION_TEXT);
+        ngx_write_stderr(" (running with ");
+        ngx_write_stderr((char *) (uintptr_t) ngx_ssl_version());
+        ngx_write_stderr(")" NGX_LINEFEED);
+#endif
+#if (NGX_LIBTLS)
+        ngx_write_stderr("built with libtls (api ");
+        sprintf(tlsapi, "%d", TLS_API);
+        ngx_write_stderr(tlsapi);
+        ngx_write_stderr(")");
+#endif
 #ifdef SSL_CTRL_SET_TLSEXT_HOSTNAME
         ngx_write_stderr("TLS SNI support enabled" NGX_LINEFEED);
 #else

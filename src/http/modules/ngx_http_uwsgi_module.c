@@ -2408,34 +2408,17 @@ ngx_http_uwsgi_ssl_conf_command_check(ngx_conf_t *cf, void *post, void *data)
 static ngx_int_t
 ngx_http_uwsgi_set_ssl(ngx_conf_t *cf, ngx_http_uwsgi_loc_conf_t *uwcf)
 {
-    ngx_pool_cleanup_t  *cln;
+    ngx_ssl_conf_t  *ssl_conf;
 
-    uwcf->upstream.ssl = ngx_pcalloc(cf->pool, sizeof(ngx_ssl_t));
-    if (uwcf->upstream.ssl == NULL) {
+    if (ngx_ssl_conf_create(cf, &ssl_conf, NULL) != NGX_OK) {
+        ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "unable to initialize ssl");
         return NGX_ERROR;
     }
 
-    uwcf->upstream.ssl->log = cf->log;
-
-    if (ngx_ssl_create(uwcf->upstream.ssl, uwcf->ssl_protocols, NULL)
+    if (ngx_ssl_ciphers(cf, ssl_conf, &uwcf->ssl_ciphers, 0)
         != NGX_OK)
     {
-        return NGX_ERROR;
-    }
-
-    cln = ngx_pool_cleanup_add(cf->pool, 0);
-    if (cln == NULL) {
-        ngx_ssl_cleanup_ctx(uwcf->upstream.ssl);
-        return NGX_ERROR;
-    }
-
-    cln->handler = ngx_ssl_cleanup_ctx;
-    cln->data = uwcf->upstream.ssl;
-
-    if (ngx_ssl_ciphers(cf, uwcf->upstream.ssl, &uwcf->ssl_ciphers, 0)
-        != NGX_OK)
-    {
-        return NGX_ERROR;
+        goto failure;
     }
 
     if (uwcf->upstream.ssl_certificate) {
@@ -2445,7 +2428,7 @@ ngx_http_uwsgi_set_ssl(ngx_conf_t *cf, ngx_http_uwsgi_loc_conf_t *uwcf)
                           "no \"uwsgi_ssl_certificate_key\" is defined "
                           "for certificate \"%V\"",
                           &uwcf->upstream.ssl_certificate->value);
-            return NGX_ERROR;
+            goto failure;
         }
 
         if (uwcf->upstream.ssl_certificate->lengths
@@ -2454,17 +2437,17 @@ ngx_http_uwsgi_set_ssl(ngx_conf_t *cf, ngx_http_uwsgi_loc_conf_t *uwcf)
             uwcf->upstream.ssl_passwords =
                   ngx_ssl_preserve_passwords(cf, uwcf->upstream.ssl_passwords);
             if (uwcf->upstream.ssl_passwords == NULL) {
-                return NGX_ERROR;
+                goto failure;
             }
 
         } else {
-            if (ngx_ssl_certificate(cf, uwcf->upstream.ssl,
+            if (ngx_ssl_certificate(cf, ssl_conf,
                                     &uwcf->upstream.ssl_certificate->value,
                                     &uwcf->upstream.ssl_certificate_key->value,
                                     uwcf->upstream.ssl_passwords)
                 != NGX_OK)
             {
-                return NGX_ERROR;
+                goto failure;
             }
         }
     }
@@ -2473,36 +2456,54 @@ ngx_http_uwsgi_set_ssl(ngx_conf_t *cf, ngx_http_uwsgi_loc_conf_t *uwcf)
         if (uwcf->ssl_trusted_certificate.len == 0) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                       "no uwsgi_ssl_trusted_certificate for uwsgi_ssl_verify");
-            return NGX_ERROR;
+            goto failure;
         }
 
-        if (ngx_ssl_trusted_certificate(cf, uwcf->upstream.ssl,
+        if (ngx_ssl_trusted_certificate(cf, ssl_conf,
                                         &uwcf->ssl_trusted_certificate,
                                         uwcf->ssl_verify_depth)
             != NGX_OK)
         {
-            return NGX_ERROR;
+            goto failure;
         }
 
-        if (ngx_ssl_crl(cf, uwcf->upstream.ssl, &uwcf->ssl_crl) != NGX_OK) {
-            return NGX_ERROR;
+        if (ngx_ssl_crl(cf, ssl_conf, &uwcf->ssl_crl) != NGX_OK) {
+            goto failure;
         }
     }
 
-    if (ngx_ssl_client_session_cache(cf, uwcf->upstream.ssl,
+    if (ngx_ssl_client_session_cache(cf, ssl_conf,
                                      uwcf->upstream.ssl_session_reuse)
         != NGX_OK)
     {
-        return NGX_ERROR;
+        goto failure;
     }
 
-    if (ngx_ssl_conf_commands(cf, uwcf->upstream.ssl, uwcf->ssl_conf_commands)
+    if (ngx_ssl_conf_commands(cf, ssl_conf, uwcf->ssl_conf_commands)
         != NGX_OK)
     {
-        return NGX_ERROR;
+        goto failure;
     }
 
+    uwcf->upstream.ssl = ngx_pcalloc(cf->pool, sizeof(ngx_ssl_t));
+    if (uwcf->upstream.ssl == NULL) {
+        goto failure;
+    }
+
+    uwcf->upstream.ssl->log = cf->log;
+
+    if (ngx_ssl_create(cf, uwcf->upstream.ssl, ssl_conf)
+        != NGX_OK)
+    {
+        goto failure;
+    }
+    ngx_ssl_conf_free(ssl_conf);
+
     return NGX_OK;
+
+failure:
+    ngx_ssl_conf_free(ssl_conf);
+    return NGX_ERROR;
 }
 
 #endif

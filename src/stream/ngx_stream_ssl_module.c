@@ -14,10 +14,6 @@ typedef ngx_int_t (*ngx_ssl_variable_handler_pt)(ngx_connection_t *c,
     ngx_pool_t *pool, ngx_str_t *s);
 
 
-#define NGX_DEFAULT_CIPHERS     "HIGH:!aNULL:!MD5"
-#define NGX_DEFAULT_ECDH_CURVE  "auto"
-
-
 static ngx_int_t ngx_stream_ssl_handler(ngx_stream_session_t *s);
 static ngx_int_t ngx_stream_ssl_init_connection(ngx_ssl_t *ssl,
     ngx_connection_t *c);
@@ -725,9 +721,9 @@ ngx_stream_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_str_value(conf->alpn, prev->alpn, "");
 
     ngx_conf_merge_str_value(conf->ecdh_curve, prev->ecdh_curve,
-                         NGX_DEFAULT_ECDH_CURVE);
+                         NGX_SSL_DEFAULT_ECDH_CURVE);
 
-    ngx_conf_merge_str_value(conf->ciphers, prev->ciphers, NGX_DEFAULT_CIPHERS);
+    ngx_conf_merge_str_value(conf->ciphers, prev->ciphers, NGX_SSL_DEFAULT_CIPHERS);
 
     ngx_conf_merge_ptr_value(conf->conf_commands, prev->conf_commands, NULL);
 

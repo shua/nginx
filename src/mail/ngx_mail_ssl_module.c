@@ -10,10 +10,6 @@
 #include <ngx_mail.h>
 
 
-#define NGX_DEFAULT_CIPHERS     "HIGH:!aNULL:!MD5"
-#define NGX_DEFAULT_ECDH_CURVE  "auto"
-
-
 #ifdef TLSEXT_TYPE_application_layer_protocol_negotiation
 static int ngx_mail_ssl_alpn_select(ngx_ssl_conn_t *ssl_conn,
     const unsigned char **out, unsigned char *outlen,
@@ -375,7 +371,7 @@ ngx_mail_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_str_value(conf->dhparam, prev->dhparam, "");
 
     ngx_conf_merge_str_value(conf->ecdh_curve, prev->ecdh_curve,
-                         NGX_DEFAULT_ECDH_CURVE);
+                         NGX_SSL_DEFAULT_ECDH_CURVE);
 
     ngx_conf_merge_str_value(conf->client_certificate,
                          prev->client_certificate, "");
@@ -383,7 +379,7 @@ ngx_mail_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                          prev->trusted_certificate, "");
     ngx_conf_merge_str_value(conf->crl, prev->crl, "");
 
-    ngx_conf_merge_str_value(conf->ciphers, prev->ciphers, NGX_DEFAULT_CIPHERS);
+    ngx_conf_merge_str_value(conf->ciphers, prev->ciphers, NGX_SSL_DEFAULT_CIPHERS);
 
     ngx_conf_merge_ptr_value(conf->conf_commands, prev->conf_commands, NULL);
 

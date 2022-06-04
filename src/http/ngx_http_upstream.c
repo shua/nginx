@@ -1769,17 +1769,13 @@ static void
 ngx_http_upstream_ssl_handshake(ngx_http_request_t *r, ngx_http_upstream_t *u,
     ngx_connection_t *c)
 {
-    long  rc;
-
     if (c->ssl->handshaked) {
 
         if (u->conf->ssl_verify) {
-            rc = SSL_get_verify_result(c->ssl->connection);
+            if (ngx_ssl_verify_certificate(c, 1) != NGX_OK) {
+                ngx_log_error(NGX_LOG_INFO, c->log, 0,
+                              "upstream SSL certificate verify error");
 
-            if (rc != X509_V_OK) {
-                ngx_log_error(NGX_LOG_ERR, c->log, 0,
-                              "upstream SSL certificate verify error: (%l:%s)",
-                              rc, X509_verify_cert_error_string(rc));
                 goto failed;
             }
 
@@ -1787,6 +1783,7 @@ ngx_http_upstream_ssl_handshake(ngx_http_request_t *r, ngx_http_upstream_t *u,
                 ngx_log_error(NGX_LOG_ERR, c->log, 0,
                               "upstream SSL certificate does not match \"%V\"",
                               &u->ssl_name);
+
                 goto failed;
             }
         }

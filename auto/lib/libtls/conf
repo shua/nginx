@@ -1,25 +1,47 @@
 
-    ngx_feature="libtls library"
-    ngx_feature_name="NGX_TLS"
-    ngx_feature_run=no
-    ngx_feature_incs="#include <tls.h>"
-    ngx_feature_path=
-    ngx_feature_libs="-ltls"
-    ngx_feature_test="tls_server()"
-    . auto/feature
+# Copyright (C) shua@isthisa.email
+# Copyright (C) Nginx, Inc.
 
-if [ $ngx_found = yes ]; then
-    have=NGX_TLS . auto/have
-    CORE_INCS="$CORE_INCS $ngx_feature_path"
-    CORE_LIBS="$CORE_LIBS $ngx_feature_libs"
-    LIBTLS=YES
+if [ "$LIBTLS" != NONE ]; then
+    have=NGX_LIBTLS . auto/have
+    have=NGX_SSL . auto/have
+
+    CORE_INCS="$CORE_INCS $LIBTLS"
+    CORE_LIBS="$CORE_LIBS $LIBTLS/libtls.a"
+
 else
 
+    if [ "$NGX_PLATFORM" != win32 ]; then
+
+        LIBTLS=NO
+
+        ngx_feature="libtls library"
+        ngx_feature_name="NGX_LIBTLS"
+        ngx_feature_run=no
+        ngx_feature_incs="#include <tls.h>"
+        ngx_feature_path=
+        ngx_feature_libs="-ltls"
+        ngx_feature_test="tls_server()"
+        . auto/feature
+
+        if [ $ngx_found = yes ]; then
+            have=NGX_SSL . auto/have
+            CORE_INCS="$CORE_INCS $ngx_feature_path"
+            CORE_LIBS="$CORE_LIBS $ngx_feature_libs"
+            LIBTLS=YES
+        fi
+    fi
+
+    if [ "$LIBTLS" != YES ]; then
 cat << END
 
-$0: error: TLS modules require the libtls library.
+$0: error: unable to find suitable libtls library.
+Either do not enable the module, install some libtls provider onto the
+system, or build the libtls library statically and specify the directory
+with "tls.h" and "libtls.a" using the --with-libtls=<path> option.
 
 END
-    exit 1
+        exit 1
+    fi
 fi
 

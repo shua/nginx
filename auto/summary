@@ -22,11 +22,21 @@ else
     esac
 fi
 
-case $OPENSSL in
-    YES)   echo "  + using system OpenSSL library" ;;
-    NONE)  echo "  + OpenSSL library is not used" ;;
-    *)     echo "  + using OpenSSL library: $OPENSSL" ;;
-esac
+if [ "$OPENSSL" = NONE ] && [ "$LIBTLS" = NONE ]; then
+    echo "  + no ssl library is used"
+else
+    case $OPENSSL in
+        YES)   echo "  + using system OpenSSL library"    ;;
+        NONE)                                             ;; # not used
+        *)     echo "  + using OpenSSL library: $OPENSSL" ;;
+    esac
+
+    case $LIBTLS in
+        YES)   echo "  + using system libtls library"   ;;
+        NONE)                                           ;; # not used
+        *)     echo "  + using libtls library: $LIBTLS" ;;
+    esac
+fi
 
 case $ZLIB in
     YES)   echo "  + using system zlib library" ;;

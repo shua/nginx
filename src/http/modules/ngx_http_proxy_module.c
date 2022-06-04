@@ -267,8 +267,12 @@ static ngx_conf_bitmask_t  ngx_http_proxy_next_upstream_masks[] = {
 #if (NGX_HTTP_SSL)
 
 static ngx_conf_bitmask_t  ngx_http_proxy_ssl_protocols[] = {
+#ifdef NGX_SSL_SSLv2
     { ngx_string("SSLv2"), NGX_SSL_SSLv2 },
+#endif
+#ifdef NGX_SSL_SSLv3
     { ngx_string("SSLv3"), NGX_SSL_SSLv3 },
+#endif
     { ngx_string("TLSv1"), NGX_SSL_TLSv1 },
     { ngx_string("TLSv1.1"), NGX_SSL_TLSv1_1 },
     { ngx_string("TLSv1.2"), NGX_SSL_TLSv1_2 },
@@ -4921,34 +4925,24 @@ ngx_http_proxy_ssl_conf_command_check(ngx_conf_t *cf, void *post, void *data)
 static ngx_int_t
 ngx_http_proxy_set_ssl(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *plcf)
 {
-    ngx_pool_cleanup_t  *cln;
+    ngx_ssl_conf_t      *ssl_conf;
 
-    plcf->upstream.ssl = ngx_pcalloc(cf->pool, sizeof(ngx_ssl_t));
-    if (plcf->upstream.ssl == NULL) {
+    if (ngx_ssl_conf_create(cf, &ssl_conf, NULL) != NGX_OK) {
+        ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
+                      "failed to intialize ssl");
         return NGX_ERROR;
     }
 
-    plcf->upstream.ssl->log = cf->log;
-
-    if (ngx_ssl_create(plcf->upstream.ssl, plcf->ssl_protocols, NULL)
+    if (ngx_ssl_protocols(cf, ssl_conf, plcf->ssl_protocols)
         != NGX_OK)
     {
-        return NGX_ERROR;
+        goto failure;
     }
 
-    cln = ngx_pool_cleanup_add(cf->pool, 0);
-    if (cln == NULL) {
-        ngx_ssl_cleanup_ctx(plcf->upstream.ssl);
-        return NGX_ERROR;
-    }
-
-    cln->handler = ngx_ssl_cleanup_ctx;
-    cln->data = plcf->upstream.ssl;
-
-    if (ngx_ssl_ciphers(cf, plcf->upstream.ssl, &plcf->ssl_ciphers, 0)
+    if (ngx_ssl_ciphers(cf, ssl_conf, &plcf->ssl_ciphers, 0)
         != NGX_OK)
     {
-        return NGX_ERROR;
+        goto failure;
     }
 
     if (plcf->upstream.ssl_certificate) {
@@ -4958,7 +4952,7 @@ ngx_http_proxy_set_ssl(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *plcf)
                           "no \"proxy_ssl_certificate_key\" is defined "
                           "for certificate \"%V\"",
                           &plcf->upstream.ssl_certificate->value);
-            return NGX_ERROR;
+            goto failure;
         }
 
         if (plcf->upstream.ssl_certificate->lengths
@@ -4967,17 +4961,17 @@ ngx_http_proxy_set_ssl(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *plcf)
             plcf->upstream.ssl_passwords =
                   ngx_ssl_preserve_passwords(cf, plcf->upstream.ssl_passwords);
             if (plcf->upstream.ssl_passwords == NULL) {
-                return NGX_ERROR;
+                goto failure;
             }
 
         } else {
-            if (ngx_ssl_certificate(cf, plcf->upstream.ssl,
+            if (ngx_ssl_certificate(cf, ssl_conf,
                                     &plcf->upstream.ssl_certificate->value,
                                     &plcf->upstream.ssl_certificate_key->value,
                                     plcf->upstream.ssl_passwords)
                 != NGX_OK)
             {
-                return NGX_ERROR;
+                goto failure;
             }
         }
     }
@@ -4986,36 +4980,54 @@ ngx_http_proxy_set_ssl(ngx_conf_t *cf, ngx_http_proxy_loc_conf_t *plcf)
         if (plcf->ssl_trusted_certificate.len == 0) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                       "no proxy_ssl_trusted_certificate for proxy_ssl_verify");
-            return NGX_ERROR;
+            goto failure;
         }
 
-        if (ngx_ssl_trusted_certificate(cf, plcf->upstream.ssl,
+        if (ngx_ssl_trusted_certificate(cf, ssl_conf,
                                         &plcf->ssl_trusted_certificate,
                                         plcf->ssl_verify_depth)
             != NGX_OK)
         {
-            return NGX_ERROR;
+            goto failure;
         }
 
-        if (ngx_ssl_crl(cf, plcf->upstream.ssl, &plcf->ssl_crl) != NGX_OK) {
-            return NGX_ERROR;
+        if (ngx_ssl_crl(cf, ssl_conf, &plcf->ssl_crl) != NGX_OK) {
+            goto failure;
         }
     }
 
-    if (ngx_ssl_client_session_cache(cf, plcf->upstream.ssl,
+    if (ngx_ssl_client_session_cache(cf, ssl_conf,
                                      plcf->upstream.ssl_session_reuse)
         != NGX_OK)
     {
-        return NGX_ERROR;
+        goto failure;
     }
 
-    if (ngx_ssl_conf_commands(cf, plcf->upstream.ssl, plcf->ssl_conf_commands)
+    if (ngx_ssl_conf_commands(cf, ssl_conf, plcf->ssl_conf_commands)
         != NGX_OK)
     {
-        return NGX_ERROR;
+        goto failure;
     }
 
+    plcf->upstream.ssl = ngx_pcalloc(cf->pool, sizeof(ngx_ssl_t));
+    if (plcf->upstream.ssl == NULL) {
+        goto failure;
+    }
+
+    plcf->upstream.ssl->log = cf->log;
+
+    if (ngx_ssl_create(cf, plcf->upstream.ssl, ssl_conf)
+        != NGX_OK)
+    {
+        goto failure;
+    }
+    ngx_ssl_conf_free(ssl_conf);
+
     return NGX_OK;
+
+failure:
+    ngx_ssl_conf_free(ssl_conf);
+    return NGX_ERROR;
 }
 
 #endif

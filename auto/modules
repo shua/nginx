@@ -673,7 +673,20 @@ if [ $HTTP = YES ]; then
     fi
 
     if [ $HTTP_SSL = YES ]; then
-        USE_OPENSSL=YES
+        if [ $USE_OPENSSL != DISABLED ]; then
+            USE_OPENSSL=YES
+        elif [ $USE_LIBTLS != DISABLED ]; then
+            USE_LIBTLS=YES
+        else
+cat <<END
+
+$0: error: enable an ssl library with --with-openssl or --with-libtls to use
+the http ssl module
+
+END
+            exit 1
+        fi
+
         have=NGX_HTTP_SSL . auto/have
 
         ngx_module_name=ngx_http_ssl_module
@@ -682,20 +695,6 @@ if [ $HTTP = YES ]; then
         ngx_module_srcs=src/http/modules/ngx_http_ssl_module.c
         ngx_module_libs=
         ngx_module_link=$HTTP_SSL
-
-        . auto/module
-    fi
-
-    if [ $HTTP_TLS = YES ]; then
-        USE_LIBTLS=YES
-        have=NGX_HTTP_TLS . auto/have
-
-        ngx_module_name=ngx_http_tls_module
-        ngx_module_incs=
-        ngx_module_deps="src/http/modules/ngx_http_tls_module.h src/event/ngx_event_tls.h"
-        ngx_module_srcs="src/http/modules/ngx_http_tls_module.c src/event/ngx_event_tls.c"
-        ngx_module_libs=
-        ngx_module_link=$HTTP_TLS
 
         . auto/module
     fi
@@ -1270,6 +1269,10 @@ if test -n "$DYNAMIC_ADDONS"; then
     done
 fi
 
+if [ $USE_LIBTLS = YES ]; then
+    CORE_DEPS="$CORE_DEPS src/event/ngx_event_libtls.h"
+    CORE_SRCS="$CORE_SRCS src/event/ngx_event_libtls.c"
+fi
 
 if [ $USE_OPENSSL = YES ]; then
     ngx_module_type=CORE

@@ -25,10 +25,7 @@ typedef struct ngx_event_s           ngx_event_t;
 typedef struct ngx_event_aio_s       ngx_event_aio_t;
 typedef struct ngx_connection_s      ngx_connection_t;
 typedef struct ngx_thread_task_s     ngx_thread_task_t;
-typedef struct ngx_ssl_s             ngx_ssl_t;
 typedef struct ngx_proxy_protocol_s  ngx_proxy_protocol_t;
-typedef struct ngx_ssl_connection_s  ngx_ssl_connection_t;
-typedef struct ngx_tls_connection_s  ngx_tls_connection_t;
 typedef struct ngx_udp_connection_s  ngx_udp_connection_t;
 
 typedef void (*ngx_event_handler_pt)(ngx_event_t *ev);
@@ -84,8 +81,8 @@ typedef void (*ngx_connection_handler_pt)(ngx_connection_t *c);
 #if (NGX_OPENSSL)
 #include <ngx_event_openssl.h>
 #endif
-#if (NGX_TLS)
-#include <ngx_event_tls.h>
+#if (NGX_LIBTLS)
+#include <ngx_event_libtls.h>
 #endif
 #include <ngx_process_cycle.h>
 #include <ngx_conf_file.h>

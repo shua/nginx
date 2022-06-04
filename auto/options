@@ -58,7 +58,6 @@ HTTP_CACHE=YES
 HTTP_CHARSET=YES
 HTTP_GZIP=YES
 HTTP_SSL=NO
-HTTP_TLS=NO
 HTTP_V2=NO
 HTTP_SSI=YES
 HTTP_REALIP=NO
@@ -152,6 +151,7 @@ PCRE2=YES
 USE_OPENSSL=NO
 OPENSSL=NONE
 USE_LIBTLS=NO
+LIBTLS=NONE
 
 USE_ZLIB=NO
 ZLIB=NONE
@@ -229,7 +229,6 @@ $0: warning: the \"--with-ipv6\" option is deprecated"
         --http-scgi-temp-path=*)         NGX_HTTP_SCGI_TEMP_PATH="$value" ;;
 
         --with-http_ssl_module)          HTTP_SSL=YES               ;;
-        --with-http_tls_module)          HTTP_TLS=YES               ;;
         --with-http_v2_module)           HTTP_V2=YES                ;;
         --with-http_realip_module)       HTTP_REALIP=YES            ;;
         --with-http_addition_module)     HTTP_ADDITION=YES          ;;
@@ -363,6 +362,12 @@ use the \"--with-mail_ssl_module\" option instead"
         --with-pcre-jit)                 PCRE_JIT=YES               ;;
         --without-pcre2)                 PCRE2=DISABLED             ;;
 
+        --without-libtls)                USE_LIBTLS=DISABLED        ;;
+        --with-libtls)                   USE_LIBTLS=YES             ;;
+        --with-libtls=*)                 LIBTLS="$value"            ;;
+
+        --without-openssl)               USE_OPENSSL=DISABLED       ;;
+        --with-openssl)                  USE_OPENSSL=YES            ;;
         --with-openssl=*)                OPENSSL="$value"           ;;
         --with-openssl-opt=*)            OPENSSL_OPT="$value"       ;;
 
@@ -589,6 +594,11 @@ cat << END
   --with-libatomic                   force libatomic_ops library usage
   --with-libatomic=DIR               set path to libatomic_ops library sources
 
+  --without-libtls                   disable libtls library usage
+  --with-libtls                      force libtls library usage
+  --with-libtls=DIR                  set path to libtls library sources
+
+  --without-openssl                  disable openssl library usage
   --with-openssl=DIR                 set path to OpenSSL library sources
   --with-openssl-opt=OPTIONS         set additional build options for OpenSSL
 
