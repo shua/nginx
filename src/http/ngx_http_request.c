@@ -10,8 +10,6 @@
 #include <ngx_http.h>
 
 
-static void ngx_http_wait_request_handler(ngx_event_t *ev);
-static ngx_http_request_t *ngx_http_alloc_request(ngx_connection_t *c);
 static void ngx_http_process_request_line(ngx_event_t *rev);
 static void ngx_http_process_request_headers(ngx_event_t *rev);
 static ssize_t ngx_http_read_request_header(ngx_http_request_t *r);
@@ -31,13 +29,8 @@ static ngx_int_t ngx_http_process_connection(ngx_http_request_t *r,
 static ngx_int_t ngx_http_process_user_agent(ngx_http_request_t *r,
     ngx_table_elt_t *h, ngx_uint_t offset);
 
-static ngx_int_t ngx_http_validate_host(ngx_str_t *host, ngx_pool_t *pool,
-    ngx_uint_t alloc);
 static ngx_int_t ngx_http_set_virtual_server(ngx_http_request_t *r,
     ngx_str_t *host);
-static ngx_int_t ngx_http_find_virtual_server(ngx_connection_t *c,
-    ngx_http_virtual_names_t *virtual_names, ngx_str_t *host,
-    ngx_http_request_t *r, ngx_http_core_srv_conf_t **cscfp);
 
 static void ngx_http_request_handler(ngx_event_t *ev);
 static void ngx_http_terminate_request(ngx_http_request_t *r, ngx_int_t rc);
@@ -60,8 +53,6 @@ static u_char *ngx_http_log_error_handler(ngx_http_request_t *r,
     ngx_http_request_t *sr, u_char *buf, size_t len);
 
 #if (NGX_HTTP_SSL)
-static void ngx_http_ssl_handshake(ngx_event_t *rev);
-static void ngx_http_ssl_handshake_handler(ngx_connection_t *c);
 #endif
 
 
@@ -374,7 +365,7 @@ ngx_http_init_connection(ngx_connection_t *c)
 }
 
 
-static void
+void
 ngx_http_wait_request_handler(ngx_event_t *rev)
 {
     u_char                    *p;
@@ -536,7 +527,7 @@ ngx_http_create_request(ngx_connection_t *c)
 }
 
 
-static ngx_http_request_t *
+ngx_http_request_t *
 ngx_http_alloc_request(ngx_connection_t *c)
 {
     ngx_pool_t                 *pool;
@@ -636,415 +627,6 @@ ngx_http_alloc_request(ngx_connection_t *c)
 
     return r;
 }
-
-#if (NGX_HTTP_SSL)
-
-static void
-ngx_http_ssl_handshake(ngx_event_t *rev)
-{
-    u_char                    *p, buf[NGX_PROXY_PROTOCOL_MAX_HEADER + 1];
-    size_t                     size;
-    ssize_t                    n;
-    ngx_err_t                  err;
-    ngx_int_t                  rc;
-    ngx_connection_t          *c;
-    ngx_http_connection_t     *hc;
-    ngx_http_ssl_srv_conf_t   *sscf;
-    ngx_http_core_loc_conf_t  *clcf;
-    ngx_http_core_srv_conf_t  *cscf;
-
-    c = rev->data;
-    hc = c->data;
-
-    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0,
-                   "http check ssl handshake");
-
-    if (rev->timedout) {
-        ngx_log_error(NGX_LOG_INFO, c->log, NGX_ETIMEDOUT, "client timed out");
-        ngx_http_close_connection(c);
-        return;
-    }
-
-    if (c->close) {
-        ngx_http_close_connection(c);
-        return;
-    }
-
-    size = hc->proxy_protocol ? sizeof(buf) : 1;
-
-    n = recv(c->fd, (char *) buf, size, MSG_PEEK);
-
-    err = ngx_socket_errno;
-
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, rev->log, 0, "http recv(): %z", n);
-
-    if (n == -1) {
-        if (err == NGX_EAGAIN) {
-            rev->ready = 0;
-
-            if (!rev->timer_set) {
-                cscf = ngx_http_get_module_srv_conf(hc->conf_ctx,
-                                                    ngx_http_core_module);
-                ngx_add_timer(rev, cscf->client_header_timeout);
-                ngx_reusable_connection(c, 1);
-            }
-
-            if (ngx_handle_read_event(rev, 0) != NGX_OK) {
-                ngx_http_close_connection(c);
-            }
-
-            return;
-        }
-
-        ngx_connection_error(c, err, "recv() failed");
-        ngx_http_close_connection(c);
-
-        return;
-    }
-
-    if (hc->proxy_protocol) {
-        hc->proxy_protocol = 0;
-
-        p = ngx_proxy_protocol_read(c, buf, buf + n);
-
-        if (p == NULL) {
-            ngx_http_close_connection(c);
-            return;
-        }
-
-        size = p - buf;
-
-        if (c->recv(c, buf, size) != (ssize_t) size) {
-            ngx_http_close_connection(c);
-            return;
-        }
-
-        c->log->action = "SSL handshaking";
-
-        if (n == (ssize_t) size) {
-            ngx_post_event(rev, &ngx_posted_events);
-            return;
-        }
-
-        n = 1;
-        buf[0] = *p;
-    }
-
-    if (n == 1) {
-        if (buf[0] & 0x80 /* SSLv2 */ || buf[0] == 0x16 /* SSLv3/TLSv1 */) {
-            ngx_log_debug1(NGX_LOG_DEBUG_HTTP, rev->log, 0,
-                           "https ssl handshake: 0x%02Xd", buf[0]);
-
-            clcf = ngx_http_get_module_loc_conf(hc->conf_ctx,
-                                                ngx_http_core_module);
-
-            if (clcf->tcp_nodelay && ngx_tcp_nodelay(c) != NGX_OK) {
-                ngx_http_close_connection(c);
-                return;
-            }
-
-            sscf = ngx_http_get_module_srv_conf(hc->conf_ctx,
-                                                ngx_http_ssl_module);
-
-            if (ngx_ssl_create_connection(&sscf->ssl, c, NGX_SSL_BUFFER)
-                != NGX_OK)
-            {
-                ngx_http_close_connection(c);
-                return;
-            }
-
-            ngx_reusable_connection(c, 0);
-
-            rc = ngx_ssl_handshake(c);
-
-            if (rc == NGX_AGAIN) {
-
-                if (!rev->timer_set) {
-                    cscf = ngx_http_get_module_srv_conf(hc->conf_ctx,
-                                                        ngx_http_core_module);
-                    ngx_add_timer(rev, cscf->client_header_timeout);
-                }
-
-                c->ssl->handler = ngx_http_ssl_handshake_handler;
-                return;
-            }
-
-            ngx_http_ssl_handshake_handler(c);
-
-            return;
-        }
-
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, rev->log, 0, "plain http");
-
-        c->log->action = "waiting for request";
-
-        rev->handler = ngx_http_wait_request_handler;
-        ngx_http_wait_request_handler(rev);
-
-        return;
-    }
-
-    ngx_log_error(NGX_LOG_INFO, c->log, 0, "client closed connection");
-    ngx_http_close_connection(c);
-}
-
-
-static void
-ngx_http_ssl_handshake_handler(ngx_connection_t *c)
-{
-    if (c->ssl->handshaked) {
-
-        /*
-         * The majority of browsers do not send the "close notify" alert.
-         * Among them are MSIE, old Mozilla, Netscape 4, Konqueror,
-         * and Links.  And what is more, MSIE ignores the server's alert.
-         *
-         * Opera and recent Mozilla send the alert.
-         */
-
-        c->ssl->no_wait_shutdown = 1;
-
-#if (NGX_HTTP_V2                                                              \
-     && defined TLSEXT_TYPE_application_layer_protocol_negotiation)
-        {
-        unsigned int            len;
-        const unsigned char    *data;
-        ngx_http_connection_t  *hc;
-
-        hc = c->data;
-
-        if (hc->addr_conf->http2) {
-
-            SSL_get0_alpn_selected(c->ssl->connection, &data, &len);
-
-            if (len == 2 && data[0] == 'h' && data[1] == '2') {
-                ngx_http_v2_init(c->read);
-                return;
-            }
-        }
-        }
-#endif
-
-        c->log->action = "waiting for request";
-
-        c->read->handler = ngx_http_wait_request_handler;
-        /* STUB: epoll edge */ c->write->handler = ngx_http_empty_handler;
-
-        ngx_reusable_connection(c, 1);
-
-        ngx_http_wait_request_handler(c->read);
-
-        return;
-    }
-
-    if (c->read->timedout) {
-        ngx_log_error(NGX_LOG_INFO, c->log, NGX_ETIMEDOUT, "client timed out");
-    }
-
-    ngx_http_close_connection(c);
-}
-
-
-#ifdef SSL_CTRL_SET_TLSEXT_HOSTNAME
-
-int
-ngx_http_ssl_servername(ngx_ssl_conn_t *ssl_conn, int *ad, void *arg)
-{
-    ngx_int_t                  rc;
-    ngx_str_t                  host;
-    const char                *servername;
-    ngx_connection_t          *c;
-    ngx_http_connection_t     *hc;
-    ngx_http_ssl_srv_conf_t   *sscf;
-    ngx_http_core_loc_conf_t  *clcf;
-    ngx_http_core_srv_conf_t  *cscf;
-
-    c = ngx_ssl_get_connection(ssl_conn);
-
-    if (c->ssl->handshaked) {
-        *ad = SSL_AD_NO_RENEGOTIATION;
-        return SSL_TLSEXT_ERR_ALERT_FATAL;
-    }
-
-    hc = c->data;
-
-    servername = SSL_get_servername(ssl_conn, TLSEXT_NAMETYPE_host_name);
-
-    if (servername == NULL) {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0,
-                       "SSL server name: null");
-        goto done;
-    }
-
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
-                   "SSL server name: \"%s\"", servername);
-
-    host.len = ngx_strlen(servername);
-
-    if (host.len == 0) {
-        goto done;
-    }
-
-    host.data = (u_char *) servername;
-
-    rc = ngx_http_validate_host(&host, c->pool, 1);
-
-    if (rc == NGX_ERROR) {
-        goto error;
-    }
-
-    if (rc == NGX_DECLINED) {
-        goto done;
-    }
-
-    rc = ngx_http_find_virtual_server(c, hc->addr_conf->virtual_names, &host,
-                                      NULL, &cscf);
-
-    if (rc == NGX_ERROR) {
-        goto error;
-    }
-
-    if (rc == NGX_DECLINED) {
-        goto done;
-    }
-
-    hc->ssl_servername = ngx_palloc(c->pool, sizeof(ngx_str_t));
-    if (hc->ssl_servername == NULL) {
-        goto error;
-    }
-
-    *hc->ssl_servername = host;
-
-    hc->conf_ctx = cscf->ctx;
-
-    clcf = ngx_http_get_module_loc_conf(hc->conf_ctx, ngx_http_core_module);
-
-    ngx_set_connection_log(c, clcf->error_log);
-
-    sscf = ngx_http_get_module_srv_conf(hc->conf_ctx, ngx_http_ssl_module);
-
-    c->ssl->buffer_size = sscf->buffer_size;
-
-    if (sscf->ssl.ctx) {
-        if (SSL_set_SSL_CTX(ssl_conn, sscf->ssl.ctx) == NULL) {
-            goto error;
-        }
-
-        /*
-         * SSL_set_SSL_CTX() only changes certs as of 1.0.0d
-         * adjust other things we care about
-         */
-
-        SSL_set_verify(ssl_conn, SSL_CTX_get_verify_mode(sscf->ssl.ctx),
-                       SSL_CTX_get_verify_callback(sscf->ssl.ctx));
-
-        SSL_set_verify_depth(ssl_conn, SSL_CTX_get_verify_depth(sscf->ssl.ctx));
-
-#if OPENSSL_VERSION_NUMBER >= 0x009080dfL
-        /* only in 0.9.8m+ */
-        SSL_clear_options(ssl_conn, SSL_get_options(ssl_conn) &
-                                    ~SSL_CTX_get_options(sscf->ssl.ctx));
-#endif
-
-        SSL_set_options(ssl_conn, SSL_CTX_get_options(sscf->ssl.ctx));
-
-#ifdef SSL_OP_NO_RENEGOTIATION
-        SSL_set_options(ssl_conn, SSL_OP_NO_RENEGOTIATION);
-#endif
-    }
-
-done:
-
-    sscf = ngx_http_get_module_srv_conf(hc->conf_ctx, ngx_http_ssl_module);
-
-    if (sscf->reject_handshake) {
-        c->ssl->handshake_rejected = 1;
-        *ad = SSL_AD_UNRECOGNIZED_NAME;
-        return SSL_TLSEXT_ERR_ALERT_FATAL;
-    }
-
-    return SSL_TLSEXT_ERR_OK;
-
-error:
-
-    *ad = SSL_AD_INTERNAL_ERROR;
-    return SSL_TLSEXT_ERR_ALERT_FATAL;
-}
-
-#endif
-
-
-#ifdef SSL_R_CERT_CB_ERROR
-
-int
-ngx_http_ssl_certificate(ngx_ssl_conn_t *ssl_conn, void *arg)
-{
-    ngx_str_t                  cert, key;
-    ngx_uint_t                 i, nelts;
-    ngx_connection_t          *c;
-    ngx_http_request_t        *r;
-    ngx_http_ssl_srv_conf_t   *sscf;
-    ngx_http_complex_value_t  *certs, *keys;
-
-    c = ngx_ssl_get_connection(ssl_conn);
-
-    if (c->ssl->handshaked) {
-        return 0;
-    }
-
-    r = ngx_http_alloc_request(c);
-    if (r == NULL) {
-        return 0;
-    }
-
-    r->logged = 1;
-
-    sscf = arg;
-
-    nelts = sscf->certificate_values->nelts;
-    certs = sscf->certificate_values->elts;
-    keys = sscf->certificate_key_values->elts;
-
-    for (i = 0; i < nelts; i++) {
-
-        if (ngx_http_complex_value(r, &certs[i], &cert) != NGX_OK) {
-            goto failed;
-        }
-
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
-                       "ssl cert: \"%s\"", cert.data);
-
-        if (ngx_http_complex_value(r, &keys[i], &key) != NGX_OK) {
-            goto failed;
-        }
-
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
-                       "ssl key: \"%s\"", key.data);
-
-        if (ngx_ssl_connection_certificate(c, r->pool, &cert, &key,
-                                           sscf->passwords)
-            != NGX_OK)
-        {
-            goto failed;
-        }
-    }
-
-    ngx_http_free_request(r, 0);
-    c->log->action = "SSL handshaking";
-    c->destroyed = 0;
-    return 1;
-
-failed:
-
-    ngx_http_free_request(r, 0);
-    c->log->action = "SSL handshaking";
-    c->destroyed = 0;
-    return 0;
-}
-
-#endif
-
-#endif
 
 
 static void
@@ -2090,7 +1672,7 @@ ngx_http_process_request(ngx_http_request_t *r)
 }
 
 
-static ngx_int_t
+ngx_int_t
 ngx_http_validate_host(ngx_str_t *host, ngx_pool_t *pool, ngx_uint_t alloc)
 {
     u_char  *h, ch;
@@ -2265,7 +1847,7 @@ ngx_http_set_virtual_server(ngx_http_request_t *r, ngx_str_t *host)
 }
 
 
-static ngx_int_t
+ngx_int_t
 ngx_http_find_virtual_server(ngx_connection_t *c,
     ngx_http_virtual_names_t *virtual_names, ngx_str_t *host,
     ngx_http_request_t *r, ngx_http_core_srv_conf_t **cscfp)

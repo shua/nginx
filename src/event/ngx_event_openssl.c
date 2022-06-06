@@ -17,6 +17,36 @@ typedef struct {
     ngx_uint_t  engine;   /* unsigned  engine:1; */
 } ngx_openssl_conf_t;
 
+typedef struct {
+    ngx_rbtree_node_t           node;
+    u_char                     *id;
+    size_t                      len;
+    u_char                     *session;
+    ngx_queue_t                 queue;
+    time_t                      expire;
+#if (NGX_PTR_SIZE == 8)
+    void                       *stub;
+    u_char                      sess_id[32];
+#endif
+} ngx_ssl_sess_id_t;
+
+typedef struct {
+    ngx_rbtree_t                session_rbtree;
+    ngx_rbtree_node_t           sentinel;
+    ngx_queue_t                 expire_queue;
+} ngx_ssl_session_cache_t;
+
+#ifdef SSL_CTRL_SET_TLSEXT_TICKET_KEY_CB
+
+typedef struct {
+    size_t                      size;
+    u_char                      name[16];
+    u_char                      hmac_key[32];
+    u_char                      aes_key[32];
+} ngx_ssl_session_ticket_key_t;
+
+#endif
+
 
 static X509 *ngx_ssl_load_certificate(ngx_pool_t *pool, char **err,
     ngx_str_t *cert, STACK_OF(X509) **chain);
@@ -279,10 +309,10 @@ ngx_ssl_conf_create(ngx_conf_t *cf, ngx_ssl_conf_t **conf, void *data)
 
     cln = ngx_pool_cleanup_add(cf->pool, 0);
     if (cln == NULL) {
-        ngx_ssl_cleanup_ctx(ssl->ctx);
+        ngx_ssl_ctx_cleanup(ssl->ctx);
         return NGX_ERROR;
     }
-    cln->handler = ngx_ssl_cleanup_ctx;
+    cln->handler = ngx_ssl_ctx_cleanup;
     cln->data = ssl->ctx;
 
     if (SSL_CTX_set_ex_data(ssl->ctx, ngx_ssl_server_conf_index, data) == 0) {
@@ -461,8 +491,9 @@ ngx_ssl_session_ticket(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_flag_t session_t
     return NGX_OK;
 }
 
-ngx_int_t ngx_ssl_protocols(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
-    ngx_uint_t protocols)
+ngx_int_t
+ngx_ssl_protocols(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+    ngx_ssl_protocol_t protocols)
 {
     ssl->protocols = protocols;
     return NGX_OK;
@@ -570,7 +601,7 @@ ngx_ssl_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *cert,
 
     /*
      * Note that x509 is not freed here, but will be instead freed in
-     * ngx_ssl_cleanup_ctx().  This is because we need to preserve all
+     * ngx_ssl_ctx_cleanup().  This is because we need to preserve all
      * certificates to be able to iterate all of them through exdata
      * (ngx_ssl_certificate_index, ngx_ssl_next_certificate_index),
      * while OpenSSL can free a certificate if it is replaced with another
@@ -1713,7 +1744,8 @@ ngx_ssl_new_client_session(ngx_ssl_conn_t *ssl_conn, ngx_ssl_session_t *sess)
 
 
 ngx_int_t
-ngx_ssl_create_connection(ngx_ssl_t *ssl, ngx_connection_t *c, ngx_uint_t flags)
+ngx_ssl_create_connection(ngx_ssl_t *ssl, ngx_connection_t *c,
+    ngx_ssl_connection_flags_t flags)
 {
     ngx_ssl_connection_t  *sc;
 
@@ -1906,7 +1938,7 @@ ngx_ssl_handshake(ngx_connection_t *c)
 #endif
 
         c->recv = ngx_ssl_recv;
-        c->send = ngx_ssl_write;
+        c->send = ngx_ssl_send;
         c->recv_chain = ngx_ssl_recv_chain;
         c->send_chain = ngx_ssl_send_chain;
 
@@ -2064,7 +2096,7 @@ ngx_ssl_try_early_data(ngx_connection_t *c)
         c->ssl->in_early = 1;
 
         c->recv = ngx_ssl_recv;
-        c->send = ngx_ssl_write;
+        c->send = ngx_ssl_send;
         c->recv_chain = ngx_ssl_recv_chain;
         c->send_chain = ngx_ssl_send_chain;
 
@@ -2698,7 +2730,7 @@ ngx_ssl_send_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
                 continue;
             }
 
-            n = ngx_ssl_write(c, in->buf->pos, in->buf->last - in->buf->pos);
+            n = ngx_ssl_send(c, in->buf->pos, in->buf->last - in->buf->pos);
 
             if (n == NGX_ERROR) {
                 return NGX_CHAIN_ERROR;
@@ -2830,7 +2862,7 @@ ngx_ssl_send_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
             return in;
         }
 
-        n = ngx_ssl_write(c, buf->pos, size);
+        n = ngx_ssl_send(c, buf->pos, size);
 
         if (n == NGX_ERROR) {
             return NGX_CHAIN_ERROR;
@@ -2870,7 +2902,7 @@ ngx_ssl_send_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit)
 
 
 ssize_t
-ngx_ssl_write(ngx_connection_t *c, u_char *data, size_t size)
+ngx_ssl_send(ngx_connection_t *c, u_char *data, size_t size)
 {
     int        n, sslerr;
     ngx_err_t  err;
@@ -4659,11 +4691,12 @@ ngx_ssl_session_ticket_keys(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_array_t *paths)
 
 
 void
-ngx_ssl_cleanup_ctx(void *data)
+ngx_ssl_ctx_cleanup(void *data)
 {
-    SSL_CTX  *ctx = data;
-
+    ngx_ssl_ctx_t *ctx;
     X509  *cert, *next;
+
+    ctx = data;
 
     cert = SSL_CTX_get_ex_data(ctx, ngx_ssl_certificate_index);
 

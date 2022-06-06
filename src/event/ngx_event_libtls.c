@@ -1,3 +1,9 @@
+
+/*
+ * Copyright (C) shua @ isthis.email
+ * Copyright (C) Nginx, Inc.
+ */
+
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_event.h>
@@ -68,7 +74,7 @@ ngx_ssl_cleanup_ctx(void *data)
 
 ngx_int_t
 ngx_ssl_protocols(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
-    ngx_uint_t protocols)
+    ngx_ssl_protocol_t protocols)
 {
     if (protocols & (NGX_SSL_SSLv2 | NGX_SSL_SSLv3)) {
         ngx_log_error(NGX_LOG_INFO, cf->log, 0,
@@ -468,7 +474,7 @@ ngx_ssl_handshake(ngx_connection_t *c)
     for (rv = TLS_WANT_POLLIN;
          rv == TLS_WANT_POLLIN || rv == TLS_WANT_POLLOUT;
     ) {
-        rv = tls_handshake(c->ssl->ctx);
+        rv = tls_handshake(c->ssl->session_ctx);
     }
     if (rv == -1) {
         ngx_log_error(NGX_LOG_EMERG, c->log, 0, "ngx_ssl_handshake() failed");
@@ -500,37 +506,47 @@ void
 ngx_ssl_connection_close(void *data)
 {
     ngx_ssl_connection_t *tc = data;
-    tls_close(tc->ctx);
-    tc->ctx = NULL;
+    tls_close(tc->session_ctx);
+    tc->session_ctx = NULL;
 }
 
 ngx_int_t
-ngx_ssl_create_connection(ngx_ssl_t *tls, ngx_connection_t *c, ngx_uint_t _buffer) {
-    ngx_ssl_connection_t *tc;
+ngx_ssl_create_connection(ngx_ssl_t *tls, ngx_connection_t *c,
+    ngx_ssl_connection_flags_t flags)
+{
+    ngx_ssl_connection_t *sc;
     ngx_pool_cleanup_t *cln;
-    tc = ngx_pcalloc(c->pool, sizeof(ngx_ssl_connection_t));
-    if (tc == NULL)
-        return NGX_ERROR;
 
-    if (tls_accept_socket(tls->ctx, &tc->ctx, c->fd) == -1) {
-        ngx_log_error(NGX_LOG_EMERG, c->log, 0,
-                      "ngx_ssl_create_connection() tls_accept_socket failed (%s)",
-                      tls_error(tls->ctx));
+    sc = ngx_pcalloc(c->pool, sizeof(ngx_ssl_connection_t));
+    if (sc == NULL) {
         return NGX_ERROR;
     }
 
-    cln = ngx_pool_cleanup_add(c->pool, 0);
-    cln->handler = ngx_ssl_connection_close;
-    cln->data = tc;
+    if (flags & NGX_SSL_CLIENT) {
+        ngx_log_error(NGX_LOG_EMERG, c->log, 0,
+                      "client ssl not yet implemented");
+        return NGX_ERROR;
+    } else {
+        if (tls_accept_socket(tls->ctx, &sc->session_ctx, c->fd) == -1) {
+            ngx_log_error(NGX_LOG_EMERG, c->log, 0,
+                          "ngx_ssl_create_connection() tls_accept_socket failed (%s)",
+                          tls_error(tls->ctx));
+            return NGX_ERROR;
+        }
 
-    c->ssl = tc;
+        cln = ngx_pool_cleanup_add(c->pool, 0);
+        cln->handler = ngx_ssl_connection_close;
+        cln->data = sc;
+    }
+
+    c->ssl = sc;
     return NGX_OK;
 }
 
 ssize_t
 ngx_ssl_recv(ngx_connection_t *c, u_char *buf, size_t size) {
     for (int n = 0, bytes = 0; size > 0; (size -= n, buf += n, bytes += n)) {
-        n = tls_read(c->ssl->ctx, buf, size);
+        n = tls_read(c->ssl->session_ctx, buf, size);
         ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0, "tls_read: %d", n);
         if (n == 0) {
             return bytes;
@@ -545,7 +561,7 @@ ngx_ssl_recv(ngx_connection_t *c, u_char *buf, size_t size) {
         } else if (n < 0) {
             c->read->error = 1;
             ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0, "tls_read err: %s",
-                           tls_error(c->ssl->ctx));
+                           tls_error(c->ssl->session_ctx));
             return NGX_ERROR;
         }
     }
@@ -643,7 +659,7 @@ ngx_ssl_send(ngx_connection_t *c, u_char *buf, size_t size) {
     ssize_t bytes = 0;
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0, "tls_write: %d", size);
     for (ssize_t n = 0; size > 0; (size -= n, buf += n, bytes += n)) {
-        n = tls_write(c->ssl->ctx, buf, size);
+        n = tls_write(c->ssl->session_ctx, buf, size);
         if (n == TLS_WANT_POLLIN || n == TLS_WANT_POLLOUT) {
             if (bytes == 0) {
                 n = 0;
@@ -656,7 +672,7 @@ ngx_ssl_send(ngx_connection_t *c, u_char *buf, size_t size) {
             return bytes;
         } else if (n < 0) {
             c->write->error = 1;
-            ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0, "tls_write err: %s", tls_error(c->ssl->ctx));
+            ngx_log_debug1(NGX_LOG_DEBUG_EVENT, c->log, 0, "tls_write err: %s", tls_error(c->ssl->session_ctx));
             return NGX_ERROR;
         }
     }
@@ -715,7 +731,7 @@ ngx_ssl_session_buflen(ngx_ssl_session_t *session, void *data)
 }
 
 void
-ngx_ssl_free_session(ngx_ssl_session_t *sesson)
+ngx_ssl_session_free(ngx_ssl_session_t *sesson)
 {
     return;
 }

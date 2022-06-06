@@ -13,7 +13,6 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
-
 typedef struct {
     ngx_flag_t                      enable;
 
@@ -68,6 +67,9 @@ typedef struct {
     u_char                         *file;
     ngx_uint_t                      line;
 } ngx_http_ssl_srv_conf_t;
+
+
+void ngx_http_ssl_handshake(ngx_event_t *rev);
 
 
 extern ngx_module_t  ngx_http_ssl_module;

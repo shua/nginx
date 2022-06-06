@@ -718,7 +718,7 @@ ngx_http_upstream_set_round_robin_peer_session(ngx_peer_connection_t *pc,
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, pc->log, 0,
                        "set session: %p", ssl_session);
 
-        ngx_ssl_free_session(ssl_session);
+        ngx_ssl_session_free(ssl_session);
 
         return rc;
     }
@@ -832,7 +832,7 @@ ngx_http_upstream_save_round_robin_peer_session(ngx_peer_connection_t *pc,
 
         /* TODO: may block */
 
-        ngx_ssl_free_session(old_ssl_session);
+        ngx_ssl_session_free(old_ssl_session);
     }
 }
 

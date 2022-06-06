@@ -85,13 +85,6 @@ ngx_int_t ngx_http_add_listen(ngx_conf_t *cf, ngx_http_core_srv_conf_t *cscf,
 void ngx_http_init_connection(ngx_connection_t *c);
 void ngx_http_close_connection(ngx_connection_t *c);
 
-#if (NGX_HTTP_SSL && defined SSL_CTRL_SET_TLSEXT_HOSTNAME)
-int ngx_http_ssl_servername(ngx_ssl_conn_t *ssl_conn, int *ad, void *arg);
-#endif
-#if (NGX_HTTP_SSL && defined SSL_R_CERT_CB_ERROR)
-int ngx_http_ssl_certificate(ngx_ssl_conn_t *ssl_conn, void *arg);
-#endif
-
 
 ngx_int_t ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b);
 ngx_int_t ngx_http_parse_uri(ngx_http_request_t *r);
@@ -125,10 +118,17 @@ void ngx_http_run_posted_requests(ngx_connection_t *c);
 ngx_int_t ngx_http_post_request(ngx_http_request_t *r,
     ngx_http_posted_request_t *pr);
 void ngx_http_finalize_request(ngx_http_request_t *r, ngx_int_t rc);
+ngx_http_request_t *ngx_http_alloc_request(ngx_connection_t *c);
 void ngx_http_free_request(ngx_http_request_t *r, ngx_int_t rc);
+ngx_int_t ngx_http_validate_host(ngx_str_t *host, ngx_pool_t *pool,
+    ngx_uint_t alloc);
+ngx_int_t ngx_http_find_virtual_server(ngx_connection_t *c,
+    ngx_http_virtual_names_t *virtual_names, ngx_str_t *host,
+    ngx_http_request_t *r, ngx_http_core_srv_conf_t **cscfp);
 
 void ngx_http_empty_handler(ngx_event_t *wev);
 void ngx_http_request_empty_handler(ngx_http_request_t *r);
+void ngx_http_wait_request_handler(ngx_event_t *ev);
 
 
 #define NGX_HTTP_LAST   1

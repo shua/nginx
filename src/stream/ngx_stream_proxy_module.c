@@ -108,12 +108,8 @@ static ngx_int_t ngx_stream_proxy_set_ssl(ngx_conf_t *cf,
 
 
 static ngx_conf_bitmask_t  ngx_stream_proxy_ssl_protocols[] = {
-#ifdef NGX_SSL_SSLv2
     { ngx_string("SSLv2"), NGX_SSL_SSLv2 },
-#endif
-#ifdef NGX_SSL_SSLv3
     { ngx_string("SSLv3"), NGX_SSL_SSLv3 },
-#endif
     { ngx_string("TLSv1"), NGX_SSL_TLSv1 },
     { ngx_string("TLSv1.1"), NGX_SSL_TLSv1_1 },
     { ngx_string("TLSv1.2"), NGX_SSL_TLSv1_2 },

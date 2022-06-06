@@ -1,5 +1,5 @@
 
-# Copyright (C) shua@isthisa.email
+# Copyright (C) shua @ isthisa.email
 # Copyright (C) Nginx, Inc.
 
 if [ "$LIBTLS" != NONE ]; then
