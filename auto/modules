@@ -1271,7 +1271,7 @@ fi
 
 if [ $USE_LIBTLS = YES ]; then
     CORE_DEPS="$CORE_DEPS src/event/ngx_event_tls.h"
-    CORE_SRCS="$CORE_SRCS src/event/ngx_event_libtls.c"
+    CORE_SRCS="$CORE_SRCS src/event/ngx_event_tls.c src/event/ngx_event_libtls.c"
 fi
 
 if [ $USE_OPENSSL = YES ]; then
@@ -1279,7 +1279,8 @@ if [ $USE_OPENSSL = YES ]; then
     ngx_module_name=ngx_openssl_module
     ngx_module_incs=
     ngx_module_deps=src/event/ngx_event_tls.h
-    ngx_module_srcs="src/event/ngx_event_openssl.c
+    ngx_module_srcs="src/event/ngx_event_tls.c
+                     src/event/ngx_event_openssl.c
                      src/event/ngx_event_openssl_stapling.c"
     ngx_module_libs=
     ngx_module_link=YES

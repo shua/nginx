@@ -615,13 +615,13 @@ ngx_http_ssl_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_uint_value(conf->ocsp, prev->ocsp, 0);
     ngx_conf_merge_str_value(conf->ocsp_responder, prev->ocsp_responder, "");
     ngx_conf_merge_ptr_value(conf->ocsp_cache_zone,
-                         prev->ocsp_cache_zone, NULL);
+                             prev->ocsp_cache_zone, NULL);
 
     ngx_conf_merge_value(conf->stapling, prev->stapling, 0);
     ngx_conf_merge_value(conf->stapling_verify, prev->stapling_verify, 0);
     ngx_conf_merge_str_value(conf->stapling_file, prev->stapling_file, "");
     ngx_conf_merge_str_value(conf->stapling_responder,
-                         prev->stapling_responder, "");
+                             prev->stapling_responder, "");
 
     if(conf->shm_zone == NULL) {
         conf->shm_zone = prev->shm_zone;
@@ -1463,7 +1463,7 @@ ngx_http_ssl_handshake_handler(ngx_connection_t *c)
 
 #ifdef SSL_CTRL_SET_TLSEXT_HOSTNAME
 
-int
+static int
 ngx_http_ssl_servername(ngx_ssl_conn_t *ssl_conn, int *ad, void *arg)
 {
     ngx_int_t                  rc;

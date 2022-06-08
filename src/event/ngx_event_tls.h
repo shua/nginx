@@ -256,31 +256,33 @@ ssize_t       ngx_ssl_send(ngx_connection_t *c, u_char *buf, size_t size);
 ngx_chain_t*  ngx_ssl_send_chain(ngx_connection_t *c, ngx_chain_t *in, off_t limit);
 
 
-// session stuff
 
-ngx_int_t ngx_ssl_session_cache_init(ngx_shm_zone_t *zone, void *data);
+// ocsp/stapling
 ngx_int_t ngx_ssl_ocsp_validate(ngx_connection_t *c);
 ngx_int_t ngx_ssl_ocsp_get_status(ngx_connection_t *c, const char **s);
 void      ngx_ssl_ocsp_cleanup(ngx_connection_t *c);
 ngx_int_t ngx_ssl_ocsp_cache_init(ngx_shm_zone_t *shm_zone, void *data);
 
+// session stuff
 #if (NGX_LIBTLS)
+ngx_int_t ngx_ssl_session_cache_init(ngx_shm_zone_t *zone, void *data);
 ngx_ssl_session_t *ngx_ssl_session_create(ngx_ssl_session_t **session,
-    const u_char **buf, long len);
-void               ngx_ssl_session_free(ngx_ssl_session_t *session);
-ngx_int_t          ngx_ssl_set_session(ngx_connection_t *c, ngx_ssl_session_t *session);
-ngx_ssl_session_t *ngx_ssl_get_session(ngx_connection_t *c);
-ngx_ssl_session_t *ngx_ssl_get0_session(ngx_connection_t *c);
-int                ngx_ssl_session_buflen(ngx_ssl_session_t *session, void *data);
-
-#elif (NGX_OPENSSL)
-#define ngx_ssl_session_create(d, b, l)  d2i_SSL_SESSION(d, b, l)
-#define ngx_ssl_session_free        SSL_SESSION_free
+                                          const u_char **buf, long len);
+void ngx_ssl_session_free(ngx_ssl_session_t *session);
 ngx_int_t ngx_ssl_set_session(ngx_connection_t *c, ngx_ssl_session_t *session);
 ngx_ssl_session_t *ngx_ssl_get_session(ngx_connection_t *c);
 ngx_ssl_session_t *ngx_ssl_get0_session(ngx_connection_t *c);
-#define ngx_ssl_session_buflen(s, d) i2d_SSL_SESSION(s, d)
+int ngx_ssl_session_buflen(ngx_ssl_session_t *session, void *data);
 
+#elif (NGX_OPENSSL)
+#define ngx_ssl_session_create d2i_SSL_SESSION
+#define ngx_ssl_session_free SSL_SESSION_free
+ngx_int_t ngx_ssl_set_session(ngx_connection_t *c, ngx_ssl_session_t *session);
+ngx_ssl_session_t *ngx_ssl_get_session(ngx_connection_t *c);
+ngx_ssl_session_t *ngx_ssl_get0_session(ngx_connection_t *c);
+#define ngx_ssl_session_buflen i2d_SSL_SESSION
+
+ngx_int_t ngx_ssl_session_cache_init(ngx_shm_zone_t *zone, void *data);
 void ngx_ssl_remove_cached_session(SSL_CTX *ssl, ngx_ssl_session_t *sess);
 #define ngx_ssl_get_connection(ssl_conn)                                      \
     SSL_get_ex_data(ssl_conn, ngx_ssl_connection_index)
