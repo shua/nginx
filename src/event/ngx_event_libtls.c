@@ -138,6 +138,10 @@ ngx_ssl_certificates(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
     ngx_str_t  *cert, *key, conf_prefix;
     ngx_uint_t  i;
 
+    if (certs == NGX_CONF_UNSET_PTR || certs == NULL || certs->nelts == 0) {
+        return NGX_OK;
+    }
+
     if (passwords != NGX_CONF_UNSET_PTR && passwords != NULL
         && passwords->nelts != 0
     ) {
@@ -174,6 +178,14 @@ ngx_ssl_certificates(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
     }
 
     for (i = 1; i < certs->nelts && i < keys->nelts; i++) {
+        if (ngx_get_full_name(cf->pool, &conf_prefix, &cert[i]) != NGX_OK) {
+            return NGX_ERROR;
+        }
+
+        if (ngx_get_full_name(cf->pool, &conf_prefix, &key[i]) != NGX_OK) {
+            return NGX_ERROR;
+        }
+
         if (ngx_ssl_add_certificate(cf, ssl, &cert[i], &key[i])
             != NGX_OK
         ) {
