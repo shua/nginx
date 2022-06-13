@@ -687,8 +687,6 @@ ngx_stream_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_stream_ssl_conf_t *prev = parent;
     ngx_stream_ssl_conf_t *conf = child;
 
-    ngx_pool_cleanup_t  *cln;
-
     ngx_conf_merge_msec_value(conf->handshake_timeout,
                          prev->handshake_timeout, 60000);
 
@@ -727,9 +725,6 @@ ngx_stream_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 
     ngx_conf_merge_ptr_value(conf->conf_commands, prev->conf_commands, NULL);
 
-
-    conf->ssl.log = cf->log;
-
     if (!conf->listen) {
         return NGX_CONF_OK;
     }
@@ -761,30 +756,35 @@ ngx_stream_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         return NGX_CONF_ERROR;
     }
 
-    if (ngx_ssl_create(&conf->ssl, conf->protocols, NULL) != NGX_OK) {
+
+    if (ngx_ssl_conf_begin(cf, &conf->ssl, NULL) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
 
-    cln = ngx_pool_cleanup_add(cf->pool, 0);
-    if (cln == NULL) {
-        ngx_ssl_cleanup_ctx(&conf->ssl);
-        return NGX_CONF_ERROR;
-    }
 
-    cln->handler = ngx_ssl_cleanup_ctx;
-    cln->data = &conf->ssl;
+#if (NGX_OPENSSL)
 
 #ifdef SSL_CTRL_SET_TLSEXT_HOSTNAME
-    SSL_CTX_set_tlsext_servername_callback(conf->ssl.ctx,
-                                           ngx_stream_ssl_servername);
+    conf->ssl.conf->servername_cb = ngx_stream_ssl_servername;
 #endif
 
 #ifdef TLSEXT_TYPE_application_layer_protocol_negotiation
     if (conf->alpn.len) {
-        SSL_CTX_set_alpn_select_cb(conf->ssl.ctx, ngx_stream_ssl_alpn_select,
-                                   &conf->alpn);
+        conf->ssl.conf->alpn_select_cb = ngx_stream_ssl_alpn_select;
+        conf->ssl.conf->alpn_select_data = &conf->alpn;
     }
 #endif
+
+#ifdef SSL_R_CERT_CB_ERROR
+    conf->ssl.conf->certificate_cb = ngx_stream_ssl_certificate;
+    conf->ssl.conf->certificate_cb_data = conf;
+#endif
+
+#endif
+
+    if (ngx_ssl_protocols(cf, &conf->ssl, conf->protocols) != NGX_OK) {
+        return NGX_CONF_ERROR;
+    }
 
     if (ngx_ssl_ciphers(cf, &conf->ssl, &conf->ciphers,
                         conf->prefer_server_ciphers)
@@ -797,32 +797,19 @@ ngx_stream_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         return NGX_CONF_ERROR;
     }
 
-    if (conf->certificate_values) {
-
-#ifdef SSL_R_CERT_CB_ERROR
-
-        /* install callback to lookup certificates */
-
-        SSL_CTX_set_cert_cb(conf->ssl.ctx, ngx_stream_ssl_certificate, conf);
-
-#else
-        ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
-                      "variables in "
-                      "\"ssl_certificate\" and \"ssl_certificate_key\" "
-                      "directives are not supported on this platform");
+    if (ngx_ssl_certificate_values(cf, &conf->ssl, conf->certificate_values,
+                                   conf->certificate_key_values,
+                                   conf->passwords)
+        != NGX_OK
+   ) {
         return NGX_CONF_ERROR;
-#endif
+    }
 
-    } else {
-
-        /* configure certificates */
-
-        if (ngx_ssl_certificates(cf, &conf->ssl, conf->certificates,
-                                 conf->certificate_keys, conf->passwords)
-            != NGX_OK)
-        {
-            return NGX_CONF_ERROR;
-        }
+    if (ngx_ssl_certificates(cf, &conf->ssl, conf->certificates,
+                             conf->certificate_keys, conf->passwords)
+        != NGX_OK)
+    {
+        return NGX_CONF_ERROR;
     }
 
     if (conf->verify) {
@@ -869,7 +856,7 @@ ngx_stream_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         conf->shm_zone = prev->shm_zone;
     }
 
-    if (ngx_ssl_session_cache(&conf->ssl, &ngx_stream_ssl_sess_id_ctx,
+    if (ngx_ssl_session_cache(cf, &conf->ssl, &ngx_stream_ssl_sess_id_ctx,
                               conf->certificates, conf->builtin_session_cache,
                               conf->shm_zone, conf->session_timeout)
         != NGX_OK)
@@ -880,11 +867,9 @@ ngx_stream_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_value(conf->session_tickets,
                          prev->session_tickets, 1);
 
-#ifdef SSL_OP_NO_TICKET
-    if (!conf->session_tickets) {
-        SSL_CTX_set_options(conf->ssl.ctx, SSL_OP_NO_TICKET);
+    if (ngx_ssl_session_ticket(cf, &conf->ssl, conf->session_tickets) != NGX_OK) {
+        return NGX_CONF_ERROR;
     }
-#endif
 
     ngx_conf_merge_ptr_value(conf->session_ticket_keys,
                          prev->session_ticket_keys, NULL);
@@ -896,6 +881,10 @@ ngx_stream_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     }
 
     if (ngx_ssl_conf_commands(cf, &conf->ssl, conf->conf_commands) != NGX_OK) {
+        return NGX_CONF_ERROR;
+    }
+
+    if (ngx_ssl_conf_end(cf, &conf->ssl) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
 

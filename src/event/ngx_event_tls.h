@@ -124,13 +124,11 @@ typedef SSL_CTX_alpn_select_cb_func  alpn_select_pt;
 typedef int (*cert_pt)(ngx_ssl_conn_t *conn, void *arg);
 
 typedef struct {
-    ngx_ssl_ctx_t                *ctx;
-
     ngx_uint_t                    protocols;
-    ngx_uint_t                    buffer_size;
 
     servername_pt                 servername_cb;
     alpn_select_pt                alpn_select_cb;
+    void                         *alpn_select_data;
     cert_pt                       certificate_cb;
     void                         *certificate_cb_data;
 } ngx_ssl_conf_t;
@@ -142,7 +140,7 @@ typedef SSL_SESSION               ngx_ssl_session_t;
 
 typedef struct {
     ngx_ssl_ctx_t                *ctx;
-    ngx_log_t                    *log;
+    ngx_ssl_conf_t               *conf;
     ssize_t                       buffer_size;
 } ngx_ssl_t;
 
@@ -188,52 +186,52 @@ typedef struct {
 
 
 ngx_int_t ngx_ssl_init(ngx_log_t *log);
-ngx_int_t ngx_ssl_conf_create(ngx_conf_t *cf, ngx_ssl_conf_t **conf, void *data);
-void      ngx_ssl_conf_free(ngx_ssl_conf_t *conf);
-ngx_int_t ngx_ssl_create(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_ssl_conf_t *conf);
-void      ngx_ssl_ctx_cleanup(void *data);
+ngx_int_t ngx_ssl_conf_begin(ngx_conf_t *cf, ngx_ssl_t *ssl, void *data);
+ngx_int_t ngx_ssl_conf_end(ngx_conf_t *cf, ngx_ssl_t *ssl);
 
 // config commands
-ngx_int_t ngx_ssl_protocols(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_int_t ngx_ssl_protocols(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_ssl_protocol_t protocols);
-ngx_int_t ngx_ssl_certificate_values(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_int_t ngx_ssl_certificate_values(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_array_t *certificate_values, ngx_array_t *key_values,
     ngx_array_t *passwords);
-ngx_int_t ngx_ssl_certificates(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_int_t ngx_ssl_certificates(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_array_t *certs, ngx_array_t *keys, ngx_array_t *passwords);
-ngx_int_t ngx_ssl_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_int_t ngx_ssl_certificate(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_str_t *cert, ngx_str_t *key, ngx_array_t *passwords);
 ngx_int_t ngx_ssl_connection_certificate(ngx_connection_t *c, ngx_pool_t *pool,
     ngx_str_t *cert, ngx_str_t *key, ngx_array_t *passwords);
-ngx_int_t ngx_ssl_session_ticket_keys(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_int_t ngx_ssl_session_ticket_keys(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_array_t *paths);
-ngx_int_t ngx_ssl_ciphers(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *ciphers,
+ngx_int_t ngx_ssl_session_ticket(ngx_conf_t *cf, ngx_ssl_t *ssl,
+    ngx_flag_t session_tickets);
+ngx_int_t ngx_ssl_ciphers(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *ciphers,
     ngx_uint_t prefer_server_ciphers);
-ngx_int_t ngx_ssl_client_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_int_t ngx_ssl_client_certificate(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_str_t *cert, ngx_int_t depth);
-ngx_int_t ngx_ssl_trusted_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_int_t ngx_ssl_trusted_certificate(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_str_t *cert, ngx_int_t depth);
-ngx_int_t ngx_ssl_crl(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *crl);
-ngx_int_t ngx_ssl_stapling(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_int_t ngx_ssl_crl(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *crl);
+ngx_int_t ngx_ssl_stapling(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_str_t *file, ngx_str_t *responder, ngx_uint_t verify);
-ngx_int_t ngx_ssl_stapling_resolver(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_int_t ngx_ssl_stapling_resolver(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_resolver_t *resolver, ngx_msec_t resolver_timeout);
-ngx_int_t ngx_ssl_ocsp(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *responder,
+ngx_int_t ngx_ssl_ocsp(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *responder,
     ngx_uint_t depth, ngx_shm_zone_t *shm_zone);
-ngx_int_t ngx_ssl_ocsp_resolver(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_int_t ngx_ssl_ocsp_resolver(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_resolver_t *resolver, ngx_msec_t resolver_timeout);
 ngx_array_t *ngx_ssl_read_password_file(ngx_conf_t *cf, ngx_str_t *file);
 ngx_array_t *ngx_ssl_preserve_passwords(ngx_conf_t *cf,
     ngx_array_t *passwords);
-ngx_int_t ngx_ssl_dhparam(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *file);
-ngx_int_t ngx_ssl_ecdh_curve(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *name);
-ngx_int_t ngx_ssl_early_data(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_int_t ngx_ssl_dhparam(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *file);
+ngx_int_t ngx_ssl_ecdh_curve(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *name);
+ngx_int_t ngx_ssl_early_data(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_uint_t enable);
-ngx_int_t ngx_ssl_conf_commands(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_int_t ngx_ssl_conf_commands(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_array_t *commands);
-ngx_int_t ngx_ssl_client_session_cache(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_int_t ngx_ssl_client_session_cache(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_uint_t enable);
-ngx_int_t ngx_ssl_session_cache(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_int_t ngx_ssl_session_cache(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_str_t *sess_ctx, ngx_array_t *certificates,
     ssize_t builtin_session_cache, ngx_shm_zone_t *shm_zone, time_t timeout);
 

@@ -4872,24 +4872,27 @@ ngx_http_grpc_ssl_conf_command_check(ngx_conf_t *cf, void *post, void *data)
 static ngx_int_t
 ngx_http_grpc_set_ssl(ngx_conf_t *cf, ngx_http_grpc_loc_conf_t *glcf)
 {
-    ngx_ssl_conf_t      *ssl_conf;
+    glcf->upstream.ssl = ngx_pcalloc(cf->pool, sizeof(ngx_ssl_t));
+    if (glcf->upstream.ssl == NULL) {
+        return NGX_ERROR;
+    }
 
-    if (ngx_ssl_conf_create(cf, &ssl_conf, NULL) != NGX_OK) {
+    if (ngx_ssl_conf_begin(cf, glcf->upstream.ssl, NULL) != NGX_OK) {
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                       "failed to intialize ssl");
         return NGX_ERROR;
     }
 
-    if (ngx_ssl_protocols(cf, ssl_conf, glcf->ssl_protocols)
+    if (ngx_ssl_protocols(cf, glcf->upstream.ssl, glcf->ssl_protocols)
         != NGX_OK)
     {
-        goto failure;
+        return NGX_ERROR;
     }
 
-    if (ngx_ssl_ciphers(cf, ssl_conf, &glcf->ssl_ciphers, 0)
+    if (ngx_ssl_ciphers(cf, glcf->upstream.ssl, &glcf->ssl_ciphers, 0)
         != NGX_OK)
     {
-        goto failure;
+        return NGX_ERROR;
     }
 
     if (glcf->upstream.ssl_certificate) {
@@ -4899,7 +4902,7 @@ ngx_http_grpc_set_ssl(ngx_conf_t *cf, ngx_http_grpc_loc_conf_t *glcf)
                           "no \"grpc_ssl_certificate_key\" is defined "
                           "for certificate \"%V\"",
                           &glcf->upstream.ssl_certificate->value);
-            goto failure;
+            return NGX_ERROR;
         }
 
         if (glcf->upstream.ssl_certificate->lengths
@@ -4908,17 +4911,17 @@ ngx_http_grpc_set_ssl(ngx_conf_t *cf, ngx_http_grpc_loc_conf_t *glcf)
             glcf->upstream.ssl_passwords =
                   ngx_ssl_preserve_passwords(cf, glcf->upstream.ssl_passwords);
             if (glcf->upstream.ssl_passwords == NULL) {
-                goto failure;
+                return NGX_ERROR;
             }
 
         } else {
-            if (ngx_ssl_certificate(cf, ssl_conf,
+            if (ngx_ssl_certificate(cf, glcf->upstream.ssl,
                                     &glcf->upstream.ssl_certificate->value,
                                     &glcf->upstream.ssl_certificate_key->value,
                                     glcf->upstream.ssl_passwords)
                 != NGX_OK)
             {
-                goto failure;
+                return NGX_ERROR;
             }
         }
     }
@@ -4927,27 +4930,27 @@ ngx_http_grpc_set_ssl(ngx_conf_t *cf, ngx_http_grpc_loc_conf_t *glcf)
         if (glcf->ssl_trusted_certificate.len == 0) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                       "no grpc_ssl_trusted_certificate for grpc_ssl_verify");
-            goto failure;
+            return NGX_ERROR;
         }
 
-        if (ngx_ssl_trusted_certificate(cf, ssl_conf,
+        if (ngx_ssl_trusted_certificate(cf, glcf->upstream.ssl,
                                         &glcf->ssl_trusted_certificate,
                                         glcf->ssl_verify_depth)
             != NGX_OK)
         {
-            goto failure;
+            return NGX_ERROR;
         }
 
-        if (ngx_ssl_crl(cf, ssl_conf, &glcf->ssl_crl) != NGX_OK) {
-            goto failure;
+        if (ngx_ssl_crl(cf, glcf->upstream.ssl, &glcf->ssl_crl) != NGX_OK) {
+            return NGX_ERROR;
         }
     }
 
-    if (ngx_ssl_client_session_cache(cf, ssl_conf,
+    if (ngx_ssl_client_session_cache(cf, glcf->upstream.ssl,
                                      glcf->upstream.ssl_session_reuse)
         != NGX_OK)
     {
-        goto failure;
+        return NGX_ERROR;
     }
 
 #ifdef TLSEXT_TYPE_application_layer_protocol_negotiation
@@ -4958,36 +4961,22 @@ ngx_http_grpc_set_ssl(ngx_conf_t *cf, ngx_http_grpc_loc_conf_t *glcf)
     {
         ngx_ssl_error(NGX_LOG_EMERG, cf->log, 0,
                       "SSL_CTX_set_alpn_protos() failed");
-        goto failure;
+        return NGX_ERROR;
     }
 
 #endif
 
-    if (ngx_ssl_conf_commands(cf, ssl_conf, glcf->ssl_conf_commands)
+    if (ngx_ssl_conf_commands(cf, glcf->upstream.ssl, glcf->ssl_conf_commands)
         != NGX_OK)
     {
-        goto failure;
+        return NGX_ERROR;
     }
 
-    glcf->upstream.ssl = ngx_pcalloc(cf->pool, sizeof(ngx_ssl_t));
-    if (glcf->upstream.ssl == NULL) {
-        goto failure;
+    if (ngx_ssl_conf_end(cf, glcf->upstream.ssl) != NGX_OK) {
+        return NGX_ERROR;
     }
-
-    glcf->upstream.ssl->log = cf->log;
-
-    if (ngx_ssl_create(cf, glcf->upstream.ssl, ssl_conf)
-        != NGX_OK)
-    {
-        goto failure;
-    }
-    ngx_ssl_conf_free(ssl_conf);
 
     return NGX_OK;
-
-failure:
-    ngx_ssl_conf_free(ssl_conf);
-    return NGX_ERROR;
 }
 
 #endif

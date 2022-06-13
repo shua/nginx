@@ -144,13 +144,13 @@ struct ngx_ssl_ocsp_ctx_s {
 
 
 static ngx_int_t ngx_ssl_stapling_certificate(ngx_conf_t *cf,
-    ngx_ssl_conf_t *ssl, X509 *cert, ngx_str_t *file, ngx_str_t *responder,
+    ngx_ssl_t *ssl, X509 *cert, ngx_str_t *file, ngx_str_t *responder,
     ngx_uint_t verify);
-static ngx_int_t ngx_ssl_stapling_file(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+static ngx_int_t ngx_ssl_stapling_file(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_ssl_stapling_t *staple, ngx_str_t *file);
-static ngx_int_t ngx_ssl_stapling_issuer(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+static ngx_int_t ngx_ssl_stapling_issuer(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_ssl_stapling_t *staple);
-static ngx_int_t ngx_ssl_stapling_responder(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+static ngx_int_t ngx_ssl_stapling_responder(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_ssl_stapling_t *staple, ngx_str_t *responder);
 
 static int ngx_ssl_certificate_status_callback(ngx_ssl_conn_t *ssl_conn,
@@ -193,7 +193,7 @@ static u_char *ngx_ssl_ocsp_log_error(ngx_log_t *log, u_char *buf, size_t len);
 
 
 ngx_int_t
-ngx_ssl_stapling(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *file,
+ngx_ssl_stapling(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *file,
     ngx_str_t *responder, ngx_uint_t verify)
 {
     X509  *cert;
@@ -216,7 +216,7 @@ ngx_ssl_stapling(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *file,
 
 
 static ngx_int_t
-ngx_ssl_stapling_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, X509 *cert,
+ngx_ssl_stapling_certificate(ngx_conf_t *cf, ngx_ssl_t *ssl, X509 *cert,
     ngx_str_t *file, ngx_str_t *responder, ngx_uint_t verify)
 {
     ngx_int_t            rc;
@@ -295,7 +295,7 @@ ngx_ssl_stapling_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, X509 *cert,
 
 
 static ngx_int_t
-ngx_ssl_stapling_file(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_stapling_file(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_ssl_stapling_t *staple, ngx_str_t *file)
 {
     BIO            *bio;
@@ -362,7 +362,7 @@ failed:
 
 
 static ngx_int_t
-ngx_ssl_stapling_issuer(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_stapling_issuer(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_ssl_stapling_t *staple)
 {
     int              i, n, rc;
@@ -446,7 +446,7 @@ ngx_ssl_stapling_issuer(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
 
 
 static ngx_int_t
-ngx_ssl_stapling_responder(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_stapling_responder(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_ssl_stapling_t *staple, ngx_str_t *responder)
 {
     char                      *s;
@@ -543,7 +543,7 @@ ngx_ssl_stapling_responder(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
 
 
 ngx_int_t
-ngx_ssl_stapling_resolver(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_stapling_resolver(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_resolver_t *resolver, ngx_msec_t resolver_timeout)
 {
     X509                *cert;
@@ -767,7 +767,7 @@ ngx_ssl_stapling_cleanup(void *data)
 
 
 ngx_int_t
-ngx_ssl_ocsp(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *responder,
+ngx_ssl_ocsp(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *responder,
     ngx_uint_t depth, ngx_shm_zone_t *shm_zone)
 {
     ngx_url_t             u;
@@ -829,7 +829,7 @@ ngx_ssl_ocsp(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *responder,
 
 
 ngx_int_t
-ngx_ssl_ocsp_resolver(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_ocsp_resolver(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_resolver_t *resolver, ngx_msec_t resolver_timeout)
 {
     ngx_ssl_ocsp_conf_t  *ocf;
@@ -2715,7 +2715,7 @@ ngx_int_t
 ngx_ssl_stapling(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *file,
     ngx_str_t *responder, ngx_uint_t verify)
 {
-    ngx_log_error(NGX_LOG_WARN, ssl->log, 0,
+    ngx_log_error(NGX_LOG_WARN, cf->log, 0,
                   "\"ssl_stapling\" ignored, not supported");
 
     return NGX_OK;
@@ -2734,7 +2734,7 @@ ngx_int_t
 ngx_ssl_ocsp(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *responder,
     ngx_uint_t depth, ngx_shm_zone_t *shm_zone)
 {
-    ngx_log_error(NGX_LOG_EMERG, ssl->log, 0,
+    ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                   "\"ssl_ocsp\" is not supported on this platform");
 
     return NGX_ERROR;

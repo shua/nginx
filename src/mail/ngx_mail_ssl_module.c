@@ -343,7 +343,6 @@ ngx_mail_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_mail_ssl_conf_t *conf = child;
 
     char                *mode;
-    ngx_pool_cleanup_t  *cln;
 
     ngx_conf_merge_value(conf->enable, prev->enable, 0);
     ngx_conf_merge_uint_value(conf->starttls, prev->starttls,
@@ -383,8 +382,6 @@ ngx_mail_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 
     ngx_conf_merge_ptr_value(conf->conf_commands, prev->conf_commands, NULL);
 
-
-    conf->ssl.log = cf->log;
 
     if (conf->listen) {
         mode = "listen ... ssl";
@@ -431,22 +428,31 @@ ngx_mail_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         return NGX_CONF_ERROR;
     }
 
-    if (ngx_ssl_create(&conf->ssl, conf->protocols, NULL) != NGX_OK) {
-        return NGX_CONF_ERROR;
+    ngx_conf_merge_value(conf->builtin_session_cache,
+                         prev->builtin_session_cache, NGX_SSL_NONE_SCACHE);
+
+    if (conf->shm_zone == NULL) {
+        conf->shm_zone = prev->shm_zone;
     }
 
-    cln = ngx_pool_cleanup_add(cf->pool, 0);
-    if (cln == NULL) {
-        ngx_ssl_cleanup_ctx(&conf->ssl);
+    ngx_conf_merge_value(conf->session_tickets,
+                         prev->session_tickets, 1);
+
+    ngx_conf_merge_ptr_value(conf->session_ticket_keys,
+                         prev->session_ticket_keys, NULL);
+
+
+    if (ngx_ssl_conf_begin(cf, &conf->ssl, NULL) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
-
-    cln->handler = ngx_ssl_cleanup_ctx;
-    cln->data = &conf->ssl;
 
 #ifdef TLSEXT_TYPE_application_layer_protocol_negotiation
-    SSL_CTX_set_alpn_select_cb(conf->ssl.ctx, ngx_mail_ssl_alpn_select, NULL);
+    conf->ssl.conf->alpn_select_cb = ngx_mail_ssl_alpn_select;
 #endif
+
+    if (ngx_ssl_protocols(cf, &conf->ssl, conf->protocols) != NGX_OK) {
+        return NGX_CONF_ERROR;
+    }
 
     if (ngx_ssl_ciphers(cf, &conf->ssl, &conf->ciphers,
                         conf->prefer_server_ciphers)
@@ -499,14 +505,7 @@ ngx_mail_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         return NGX_CONF_ERROR;
     }
 
-    ngx_conf_merge_value(conf->builtin_session_cache,
-                         prev->builtin_session_cache, NGX_SSL_NONE_SCACHE);
-
-    if (conf->shm_zone == NULL) {
-        conf->shm_zone = prev->shm_zone;
-    }
-
-    if (ngx_ssl_session_cache(&conf->ssl, &ngx_mail_ssl_sess_id_ctx,
+    if (ngx_ssl_session_cache(cf, &conf->ssl, &ngx_mail_ssl_sess_id_ctx,
                               conf->certificates, conf->builtin_session_cache,
                               conf->shm_zone, conf->session_timeout)
         != NGX_OK)
@@ -514,17 +513,9 @@ ngx_mail_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         return NGX_CONF_ERROR;
     }
 
-    ngx_conf_merge_value(conf->session_tickets,
-                         prev->session_tickets, 1);
-
-#ifdef SSL_OP_NO_TICKET
-    if (!conf->session_tickets) {
-        SSL_CTX_set_options(conf->ssl.ctx, SSL_OP_NO_TICKET);
+    if (ngx_ssl_session_ticket(cf, &conf->ssl, conf->session_tickets) != NGX_OK) {
+        return NGX_CONF_ERROR;
     }
-#endif
-
-    ngx_conf_merge_ptr_value(conf->session_ticket_keys,
-                         prev->session_ticket_keys, NULL);
 
     if (ngx_ssl_session_ticket_keys(cf, &conf->ssl, conf->session_ticket_keys)
         != NGX_OK)
@@ -533,6 +524,10 @@ ngx_mail_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     }
 
     if (ngx_ssl_conf_commands(cf, &conf->ssl, conf->conf_commands) != NGX_OK) {
+        return NGX_CONF_ERROR;
+    }
+
+    if (ngx_ssl_conf_end(cf, &conf->ssl) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
 

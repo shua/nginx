@@ -8,8 +8,9 @@
 #include <ngx_core.h>
 #include <ngx_event.h>
 
+static void ngx_ssl_ctx_cleanup(void *data);
 static void ngx_ssl_connection_close(void *data);
-static ngx_int_t ngx_ssl_add_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+static ngx_int_t ngx_ssl_add_certificate(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_str_t *cert, ngx_str_t *key);
 
 ngx_int_t
@@ -23,25 +24,37 @@ ngx_ssl_init(ngx_log_t *log)
 }
 
 ngx_int_t
-ngx_ssl_conf_create(ngx_conf_t *cf, ngx_ssl_conf_t **conf, void *data)
+ngx_ssl_conf_begin(ngx_conf_t *cf, ngx_ssl_t *ssl, void *data)
 {
-    *conf = tls_config_new();
-    if (conf == NULL) {
-        ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "failed to create ssl config");
-        return NGX_ERROR;
+    if (ssl->conf == NULL) {
+        ssl->conf = tls_config_new();
+        if (ssl->conf == NULL) {
+            ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "failed to create ssl config");
+            return NGX_ERROR;
+        }
+    } else {
+        tls_conf_reset(ssl->conf);
     }
+
     return NGX_OK;
 }
 
-void
-ngx_ssl_conf_free(ngx_ssl_conf_t *conf)
-{
-    tls_config_free(conf);
-}
-
 ngx_int_t
-ngx_ssl_create(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_ssl_conf_t *conf)
+ngx_ssl_conf_end(ngx_conf_t *cf, ngx_ssl_t *ssl)
 {
+    ngx_pool_cleanup_t  *cln;
+
+    if (ssl->ctx != NULL) {
+        ngx_ssl_ctx_cleanup(ssl->ctx);
+    } else {
+        cln = ngx_pool_cleanup_add(cf->pool, 0);
+        if (cln == NULL) {
+            ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
+                          "failed to add cleanup function");
+            return NGX_ERROR;
+        }
+    }
+
     /* TODO: tls client? is that only on upstream? */
     ssl->ctx = tls_server();
     if (ssl->ctx == NULL) {
@@ -49,32 +62,38 @@ ngx_ssl_create(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_ssl_conf_t *conf)
         return NGX_ERROR;
     }
 
-    if (tls_configure(ssl->ctx, conf) == -1) {
+    if (tls_configure(ssl->ctx, ssl->conf) == -1) {
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "failed to configure tls: %s",
                       tls_error(ssl->ctx));
         return NGX_ERROR;
     }
 
+    tls_config_free(ssl->conf);
+    ssl->conf = NULL;
+
+    if (cln != NULL) {
+        cln->handler = ngx_ssl_ctx_cleanup;
+        cln->data = ssl->ctx;
+    }
+
     return NGX_OK;
 }
 
-void
-ngx_ssl_cleanup_ctx(void *data)
+static void
+ngx_ssl_ctx_cleanup(void *data)
 {
-    ngx_ssl_t *ssl;
-    ssl = data;
-    if (ssl == NULL)
-        return;
+    ngx_ssl_ctx_t *ctx = data;
 
-    if (ssl->ctx != NULL) {
-        tls_free(ssl->ctx);
-        ssl->ctx = NULL;
+    if (ctx == NULL) {
+        return;
     }
+
+    tls_free(ctx);
 }
 
 
 ngx_int_t
-ngx_ssl_protocols(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_protocols(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_ssl_protocol_t protocols)
 {
     if (protocols & (NGX_SSL_SSLv2 | NGX_SSL_SSLv3)) {
@@ -87,7 +106,7 @@ ngx_ssl_protocols(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
         | ((protocols & NGX_SSL_TLSv1_1) ? TLS_PROTOCOL_TLSv1_1 : 0)
         | ((protocols & NGX_SSL_TLSv1_2) ? TLS_PROTOCOL_TLSv1_2 : 0)
         | ((protocols & NGX_SSL_TLSv1_3) ? TLS_PROTOCOL_TLSv1_3 : 0);
-    if (tls_config_set_protocols(ssl, tls_protocols) == -1) {
+    if (tls_config_set_protocols(ssl->conf, tls_protocols) == -1) {
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                       "failed setting protocols: %s",
                       tls_config_error(ssl));
@@ -97,7 +116,7 @@ ngx_ssl_protocols(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
 }
 
 ngx_int_t
-ngx_ssl_certificate_values(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_certificate_values(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_array_t *certs, ngx_array_t *keys, ngx_array_t *passwords)
 {
     ngx_str_t  *cert, *key;
@@ -118,7 +137,7 @@ ngx_ssl_certificate_values(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
     cert = certs->elts;
     key = keys->elts;
     for (i=0; i < certs->nelts && i < keys->nelts; i++) {
-        if (tls_config_add_keypair_mem(ssl,
+        if (tls_config_add_keypair_mem(ssl->conf,
                                        cert[i].data, cert[i].len,
                                        key[i].data, key[i].len)
             == -1
@@ -132,7 +151,7 @@ ngx_ssl_certificate_values(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
 }
 
 ngx_int_t
-ngx_ssl_certificates(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_certificates(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_array_t *certs, ngx_array_t *keys, ngx_array_t *passwords)
 {
     ngx_str_t  *cert, *key, conf_prefix;
@@ -215,7 +234,7 @@ ngx_ssl_try_load(ngx_str_t *file, ngx_array_t *passwords) {
 }
 
 ngx_int_t
-ngx_ssl_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_certificate(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_str_t *cert, ngx_str_t *key, ngx_array_t *passwords)
 {
     if (cert->len > 0) {
@@ -241,7 +260,7 @@ ngx_ssl_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
                 return NGX_ERROR;
             }
 
-            if (tls_config_set_keypair_mem(ssl,
+            if (tls_config_set_keypair_mem(ssl->conf,
                                            cert_value.data, cert_value.len,
                                            key_value.data, key_value.len)
                 == -1
@@ -255,7 +274,7 @@ ngx_ssl_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
             }
 
         } else {
-            if (tls_config_set_keypair_file(ssl,
+            if (tls_config_set_keypair_file(ssl->conf,
                                             (const char *) cert->data,
                                             (const char *) key->data)
                 == -1
@@ -272,11 +291,11 @@ ngx_ssl_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
 }
 
 ngx_int_t
-ngx_ssl_add_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_add_certificate(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_str_t *cert, ngx_str_t *key)
 {
     if (cert->len > 0) {
-        if (tls_config_add_keypair_file(ssl,
+        if (tls_config_add_keypair_file(ssl->conf,
                                         (const char *) cert->data,
                                         (const char *) key->data)
             == -1
@@ -300,7 +319,7 @@ ngx_ssl_connection_certificate(ngx_connection_t *c, ngx_pool_t *pool,
 }
 
 ngx_int_t
-ngx_ssl_session_ticket_keys(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_array_t *paths)
+ngx_ssl_session_ticket_keys(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_array_t *paths)
 {
     if (paths != NGX_CONF_UNSET_PTR && paths != NULL && paths->nelts > 0) {
         ngx_log_error(NGX_LOG_WARN, cf->log, 0,
@@ -312,11 +331,11 @@ ngx_ssl_session_ticket_keys(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_array_t *pa
 
 
 ngx_int_t
-ngx_ssl_ciphers(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *ciphers,
+ngx_ssl_ciphers(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *ciphers,
     ngx_uint_t prefer_server_ciphers)
 {
     if (ciphers->len > 0) {
-        if (tls_config_set_ciphers(ssl, (const char *)ciphers->data) == -1) {
+        if (tls_config_set_ciphers(ssl->conf, (const char *)ciphers->data) == -1) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "unable to set ciphers: %s",
                           tls_config_error(ssl));
             return NGX_ERROR;
@@ -324,14 +343,14 @@ ngx_ssl_ciphers(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *ciphers,
     }
 
     if (prefer_server_ciphers) {
-        tls_config_prefer_ciphers_server(ssl);
+        tls_config_prefer_ciphers_server(ssl->conf);
     }
 
     return NGX_OK;
 }
 
 ngx_int_t
-ngx_ssl_client_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_client_certificate(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_str_t *cert, ngx_int_t depth)
 {
     if (cert->len > 0) {
@@ -347,7 +366,7 @@ ngx_ssl_client_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
 }
 
 ngx_int_t
-ngx_ssl_trusted_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_trusted_certificate(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_str_t *cert, ngx_int_t depth)
 {
     ngx_str_t conf_prefix;
@@ -358,7 +377,7 @@ ngx_ssl_trusted_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
             return NGX_ERROR;
         }
 
-        if (tls_config_set_ca_file(ssl, (const char *) cert->data) == -1) {
+        if (tls_config_set_ca_file(ssl->conf, (const char *) cert->data) == -1) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                           "unable to set trusted certificate: %s",
                           tls_config_error(ssl));
@@ -366,7 +385,7 @@ ngx_ssl_trusted_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
         }
 
         if (depth) {
-            if (tls_config_set_verify_depth(ssl, depth) == -1) {
+            if (tls_config_set_verify_depth(ssl->conf, depth) == -1) {
                 ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                               "unable to set certificate verify depth: %s",
                               tls_config_error(ssl));
@@ -378,7 +397,7 @@ ngx_ssl_trusted_certificate(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
 }
 
 ngx_int_t
-ngx_ssl_crl(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *crl)
+ngx_ssl_crl(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *crl)
 {
     ngx_str_t conf_prefix;
     conf_prefix = ngx_cycle->conf_prefix;
@@ -388,7 +407,7 @@ ngx_ssl_crl(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *crl)
             return NGX_ERROR;
         }
 
-        if (tls_config_set_crl_file(ssl, (const char *) crl->data) == -1) {
+        if (tls_config_set_crl_file(ssl->conf, (const char *) crl->data) == -1) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "unable to set crl: %s",
                           tls_config_error(ssl));
             return NGX_ERROR;
@@ -399,7 +418,7 @@ ngx_ssl_crl(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *crl)
 }
 
 ngx_int_t
-ngx_ssl_stapling(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_stapling(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_str_t *file, ngx_str_t *responder, ngx_uint_t verify)
 {
     ngx_str_t conf_prefix;
@@ -410,7 +429,7 @@ ngx_ssl_stapling(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
             return NGX_ERROR;
         }
 
-        if (tls_config_set_ocsp_staple_file(ssl, (const char *) file->data)
+        if (tls_config_set_ocsp_staple_file(ssl->conf, (const char *) file->data)
             == -1
         ) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
@@ -429,7 +448,7 @@ ngx_ssl_stapling(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
 }
 
 ngx_int_t
-ngx_ssl_stapling_resolver(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_stapling_resolver(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_resolver_t *resolver, ngx_msec_t resolver_timeout)
 {
     if (resolver != NGX_CONF_UNSET_PTR && resolver != NULL) {
@@ -440,7 +459,7 @@ ngx_ssl_stapling_resolver(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
 }
 
 ngx_int_t
-ngx_ssl_ocsp(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *responder,
+ngx_ssl_ocsp(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *responder,
     ngx_uint_t depth, ngx_shm_zone_t *shm_zone)
 {
     if (responder->len > 0) {
@@ -451,7 +470,7 @@ ngx_ssl_ocsp(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *responder,
 }
 
 ngx_int_t
-ngx_ssl_ocsp_resolver(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_ocsp_resolver(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_resolver_t *resolver, ngx_msec_t resolver_timeout)
 {
     if (resolver != NGX_CONF_UNSET_PTR && resolver != NULL) {
@@ -462,7 +481,7 @@ ngx_ssl_ocsp_resolver(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
 }
 
 ngx_int_t
-ngx_ssl_dhparam(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *file)
+ngx_ssl_dhparam(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *file)
 {
     if (file->len != 0) {
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0,\
@@ -473,10 +492,10 @@ ngx_ssl_dhparam(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *file)
 }
 
 ngx_int_t
-ngx_ssl_ecdh_curve(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *name)
+ngx_ssl_ecdh_curve(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *name)
 {
     if (name->len > 0) {
-        if (tls_config_set_ecdhecurves(ssl, (const char*)name->data) == -1) {
+        if (tls_config_set_ecdhecurves(ssl->conf, (const char*)name->data) == -1) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                           "unable to set ecdh curves: %s",
                           tls_config_error(ssl));
@@ -487,7 +506,7 @@ ngx_ssl_ecdh_curve(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *name)
 }
 
 ngx_int_t
-ngx_ssl_early_data(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_uint_t enable)
+ngx_ssl_early_data(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_uint_t enable)
 {
     if (enable) {
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "ssl early data not implemented");
@@ -497,7 +516,7 @@ ngx_ssl_early_data(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_uint_t enable)
 }
 
 ngx_int_t
-ngx_ssl_conf_commands(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_conf_commands(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_array_t *commands)
 {
     if (commands != NGX_CONF_UNSET_PTR && commands != NULL
@@ -511,7 +530,7 @@ ngx_ssl_conf_commands(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
 }
 
 ngx_int_t
-ngx_ssl_client_session_cache(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
+ngx_ssl_client_session_cache(ngx_conf_t *cf, ngx_ssl_t *ssl,
     ngx_uint_t enable)
 {
     if (enable) {
@@ -523,7 +542,7 @@ ngx_ssl_client_session_cache(ngx_conf_t *cf, ngx_ssl_conf_t *ssl,
 }
 
 ngx_int_t
-ngx_ssl_session_cache(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *sess_ctx,
+ngx_ssl_session_cache(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *sess_ctx,
     ngx_array_t *certificates, ssize_t builtin_session_cache,
     ngx_shm_zone_t *shm_zone, time_t timeout)
 {
@@ -548,14 +567,14 @@ ngx_ssl_session_cache(ngx_conf_t *cf, ngx_ssl_conf_t *ssl, ngx_str_t *sess_ctx,
         return NGX_OK;
 
     case NGX_SSL_DFLT_BUILTIN_SCACHE:
-        if (tls_config_set_session_lifetime(ssl, timeout) == -1) {
+        if (tls_config_set_session_lifetime(ssl->conf, timeout) == -1) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                           "unable to set ssl session cache timeout: %s",
                           tls_config_error(ssl));
             return NGX_ERROR;
         }
         if (sess_ctx->len > 0) {
-            if (tls_config_set_session_id(ssl, sess_ctx->data, sess_ctx->len) == -1) {
+            if (tls_config_set_session_id(ssl->conf, sess_ctx->data, sess_ctx->len) == -1) {
                 ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                               "unable to set ssl session id: %s",
                               tls_config_error(ssl));
@@ -652,6 +671,11 @@ ngx_ssl_create_connection(ngx_ssl_t *ssl, ngx_connection_t *c,
             }
 
             cln = ngx_pool_cleanup_add(c->pool, 0);
+            if (cln == NULL) {
+                ngx_log_error(NGX_LOG_EMERG, c->log, 0,
+                              "failed to add cleanup function");
+                return NGX_ERROR;
+            }
             cln->handler = ngx_ssl_connection_close;
             cln->data = sc;
         }

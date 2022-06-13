@@ -2199,27 +2199,14 @@ ngx_stream_proxy_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
 static ngx_int_t
 ngx_stream_proxy_set_ssl(ngx_conf_t *cf, ngx_stream_proxy_srv_conf_t *pscf)
 {
-    ngx_pool_cleanup_t  *cln;
-
     pscf->ssl = ngx_pcalloc(cf->pool, sizeof(ngx_ssl_t));
     if (pscf->ssl == NULL) {
         return NGX_ERROR;
     }
 
-    pscf->ssl->log = cf->log;
-
-    if (ngx_ssl_create(pscf->ssl, pscf->ssl_protocols, NULL) != NGX_OK) {
+    if (ngx_ssl_conf_begin(cf, pscf->ssl, NULL) != NGX_OK) {
         return NGX_ERROR;
     }
-
-    cln = ngx_pool_cleanup_add(cf->pool, 0);
-    if (cln == NULL) {
-        ngx_ssl_cleanup_ctx(pscf->ssl);
-        return NGX_ERROR;
-    }
-
-    cln->handler = ngx_ssl_cleanup_ctx;
-    cln->data = pscf->ssl;
 
     if (ngx_ssl_ciphers(cf, pscf->ssl, &pscf->ssl_ciphers, 0) != NGX_OK) {
         return NGX_ERROR;
@@ -2285,6 +2272,10 @@ ngx_stream_proxy_set_ssl(ngx_conf_t *cf, ngx_stream_proxy_srv_conf_t *pscf)
     if (ngx_ssl_conf_commands(cf, pscf->ssl, pscf->ssl_conf_commands)
         != NGX_OK)
     {
+        return NGX_ERROR;
+    }
+
+    if (ngx_ssl_conf_end(cf, pscf->ssl) != NGX_OK) {
         return NGX_ERROR;
     }
 
