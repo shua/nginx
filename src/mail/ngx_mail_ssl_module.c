@@ -442,12 +442,15 @@ ngx_mail_ssl_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                          prev->session_ticket_keys, NULL);
 
 
+
     if (ngx_ssl_conf_begin(cf, &conf->ssl, NULL) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
 
+#if (NGX_OPENSSL)
 #ifdef TLSEXT_TYPE_application_layer_protocol_negotiation
     conf->ssl.conf->alpn_select_cb = ngx_mail_ssl_alpn_select;
+#endif
 #endif
 
     if (ngx_ssl_protocols(cf, &conf->ssl, conf->protocols) != NGX_OK) {

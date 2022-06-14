@@ -383,12 +383,9 @@ ngx_mail_ssl_handshake_handler(ngx_connection_t *c)
     ngx_mail_close_connection(c);
 }
 
-
 static ngx_int_t
 ngx_mail_verify_cert(ngx_mail_session_t *s, ngx_connection_t *c)
 {
-    long                       rc;
-    X509                      *cert;
     ngx_mail_ssl_conf_t       *sslcf;
     ngx_mail_core_srv_conf_t  *cscf;
 
@@ -398,18 +395,7 @@ ngx_mail_verify_cert(ngx_mail_session_t *s, ngx_connection_t *c)
         return NGX_OK;
     }
 
-    rc = SSL_get_verify_result(c->ssl->connection);
-
-    if (rc != X509_V_OK
-        && (sslcf->verify != 3 || !ngx_ssl_verify_error_optional(rc)))
-    {
-        ngx_log_error(NGX_LOG_INFO, c->log, 0,
-                      "client SSL certificate verify error: (%l:%s)",
-                      rc, X509_verify_cert_error_string(rc));
-
-        ngx_ssl_remove_cached_session(c->ssl->session_ctx,
-                                      (SSL_get0_session(c->ssl->connection)));
-
+    if (ngx_ssl_verify_certificate(c, sslcf->verify) != NGX_OK) {
         cscf = ngx_mail_get_module_srv_conf(s, ngx_mail_core_module);
 
         s->out = cscf->protocol->cert_error;
@@ -418,31 +404,20 @@ ngx_mail_verify_cert(ngx_mail_session_t *s, ngx_connection_t *c)
         c->write->handler = ngx_mail_send;
 
         ngx_mail_send(s->connection->write);
+
         return NGX_ERROR;
     }
 
-    if (sslcf->verify == 1) {
-        cert = SSL_get_peer_certificate(c->ssl->connection);
+    if (ngx_ssl_verify_client_sent_certificate(c, sslcf->verify) != NGX_OK) {
+        cscf = ngx_mail_get_module_srv_conf(s, ngx_mail_core_module);
 
-        if (cert == NULL) {
-            ngx_log_error(NGX_LOG_INFO, c->log, 0,
-                          "client sent no required SSL certificate");
+        s->out = cscf->protocol->no_cert;
+        s->quit = 1;
 
-            ngx_ssl_remove_cached_session(c->ssl->session_ctx,
-                                       (SSL_get0_session(c->ssl->connection)));
+        c->write->handler = ngx_mail_send;
 
-            cscf = ngx_mail_get_module_srv_conf(s, ngx_mail_core_module);
-
-            s->out = cscf->protocol->no_cert;
-            s->quit = 1;
-
-            c->write->handler = ngx_mail_send;
-
-            ngx_mail_send(s->connection->write);
-            return NGX_ERROR;
-        }
-
-        X509_free(cert);
+        ngx_mail_send(s->connection->write);
+        return NGX_ERROR;
     }
 
     return NGX_OK;

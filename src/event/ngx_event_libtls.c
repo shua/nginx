@@ -32,8 +32,6 @@ ngx_ssl_conf_begin(ngx_conf_t *cf, ngx_ssl_t *ssl, void *data)
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "failed to create ssl config");
             return NGX_ERROR;
         }
-    } else {
-        tls_conf_reset(ssl->conf);
     }
 
     return NGX_OK;
@@ -42,7 +40,7 @@ ngx_ssl_conf_begin(ngx_conf_t *cf, ngx_ssl_t *ssl, void *data)
 ngx_int_t
 ngx_ssl_conf_end(ngx_conf_t *cf, ngx_ssl_t *ssl)
 {
-    ngx_pool_cleanup_t  *cln;
+    ngx_pool_cleanup_t  *cln = NULL;
 
     if (ssl->ctx != NULL) {
         ngx_ssl_ctx_cleanup(ssl->ctx);
@@ -109,7 +107,7 @@ ngx_ssl_protocols(ngx_conf_t *cf, ngx_ssl_t *ssl,
     if (tls_config_set_protocols(ssl->conf, tls_protocols) == -1) {
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                       "failed setting protocols: %s",
-                      tls_config_error(ssl));
+                      tls_config_error(ssl->conf));
         return NGX_ERROR;
     }
     return NGX_OK;
@@ -267,7 +265,7 @@ ngx_ssl_certificate(ngx_conf_t *cf, ngx_ssl_t *ssl,
             ) {
                 ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                               "unable to set certificate: %s",
-                              tls_config_error(ssl));
+                              tls_config_error(ssl->conf));
                 tls_unload_file(cert_value.data, cert_value.len);
                 tls_unload_file(key_value.data, key_value.len);
                 return NGX_ERROR;
@@ -281,7 +279,7 @@ ngx_ssl_certificate(ngx_conf_t *cf, ngx_ssl_t *ssl,
             ) {
                 ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                               "unable to set certificate: %s",
-                              tls_config_error(ssl));
+                              tls_config_error(ssl->conf));
                 return NGX_ERROR;
             }
 
@@ -302,7 +300,7 @@ ngx_ssl_add_certificate(ngx_conf_t *cf, ngx_ssl_t *ssl,
         ) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                           "unable to add certificate: %s",
-                          tls_config_error(ssl));
+                          tls_config_error(ssl->conf));
             return NGX_ERROR;
         }
     }
@@ -329,6 +327,17 @@ ngx_ssl_session_ticket_keys(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_array_t *paths)
     return NGX_OK;
 }
 
+ngx_int_t
+ngx_ssl_session_ticket(ngx_conf_t *cf, ngx_ssl_t *ssl,
+    ngx_flag_t session_tickets)
+{
+    if (session_tickets) {
+        ngx_log_error(NGX_LOG_WARN, cf->log, 0,
+                      "\"ssl_session_ticket\" ignored, not supported");
+    }
+
+    return NGX_OK;
+}
 
 ngx_int_t
 ngx_ssl_ciphers(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *ciphers,
@@ -337,7 +346,7 @@ ngx_ssl_ciphers(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *ciphers,
     if (ciphers->len > 0) {
         if (tls_config_set_ciphers(ssl->conf, (const char *)ciphers->data) == -1) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "unable to set ciphers: %s",
-                          tls_config_error(ssl));
+                          tls_config_error(ssl->conf));
             return NGX_ERROR;
         }
     }
@@ -380,7 +389,7 @@ ngx_ssl_trusted_certificate(ngx_conf_t *cf, ngx_ssl_t *ssl,
         if (tls_config_set_ca_file(ssl->conf, (const char *) cert->data) == -1) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                           "unable to set trusted certificate: %s",
-                          tls_config_error(ssl));
+                          tls_config_error(ssl->conf));
             return NGX_ERROR;
         }
 
@@ -388,7 +397,7 @@ ngx_ssl_trusted_certificate(ngx_conf_t *cf, ngx_ssl_t *ssl,
             if (tls_config_set_verify_depth(ssl->conf, depth) == -1) {
                 ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                               "unable to set certificate verify depth: %s",
-                              tls_config_error(ssl));
+                              tls_config_error(ssl->conf));
                 return NGX_ERROR;
             }
         }
@@ -409,7 +418,7 @@ ngx_ssl_crl(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *crl)
 
         if (tls_config_set_crl_file(ssl->conf, (const char *) crl->data) == -1) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0, "unable to set crl: %s",
-                          tls_config_error(ssl));
+                          tls_config_error(ssl->conf));
             return NGX_ERROR;
         }
     }
@@ -434,7 +443,7 @@ ngx_ssl_stapling(ngx_conf_t *cf, ngx_ssl_t *ssl,
         ) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                           "unable to set ocsp staple file: %s",
-                          tls_config_error(ssl));
+                          tls_config_error(ssl->conf));
             return NGX_ERROR;
         }
         if (responder->len > 0 || verify != 0) {
@@ -498,7 +507,7 @@ ngx_ssl_ecdh_curve(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *name)
         if (tls_config_set_ecdhecurves(ssl->conf, (const char*)name->data) == -1) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                           "unable to set ecdh curves: %s",
-                          tls_config_error(ssl));
+                          tls_config_error(ssl->conf));
             return NGX_ERROR;
         }
     }
@@ -570,14 +579,14 @@ ngx_ssl_session_cache(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_str_t *sess_ctx,
         if (tls_config_set_session_lifetime(ssl->conf, timeout) == -1) {
             ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                           "unable to set ssl session cache timeout: %s",
-                          tls_config_error(ssl));
+                          tls_config_error(ssl->conf));
             return NGX_ERROR;
         }
         if (sess_ctx->len > 0) {
             if (tls_config_set_session_id(ssl->conf, sess_ctx->data, sess_ctx->len) == -1) {
                 ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                               "unable to set ssl session id: %s",
-                              tls_config_error(ssl));
+                              tls_config_error(ssl->conf));
                 return NGX_ERROR;
             }
         }

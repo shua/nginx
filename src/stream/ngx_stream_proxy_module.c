@@ -1108,9 +1108,8 @@ ngx_stream_proxy_ssl_init_connection(ngx_stream_session_t *s)
 static void
 ngx_stream_proxy_ssl_handshake(ngx_connection_t *pc)
 {
-    long                          rc;
-    ngx_stream_session_t         *s;
     ngx_stream_upstream_t        *u;
+    ngx_stream_session_t         *s;
     ngx_stream_proxy_srv_conf_t  *pscf;
 
     s = pc->data;
@@ -1120,12 +1119,7 @@ ngx_stream_proxy_ssl_handshake(ngx_connection_t *pc)
     if (pc->ssl->handshaked) {
 
         if (pscf->ssl_verify) {
-            rc = SSL_get_verify_result(pc->ssl->connection);
-
-            if (rc != X509_V_OK) {
-                ngx_log_error(NGX_LOG_ERR, pc->log, 0,
-                              "upstream SSL certificate verify error: (%l:%s)",
-                              rc, X509_verify_cert_error_string(rc));
+            if (ngx_ssl_verify_certificate(pc, pscf->ssl_verify) != NGX_OK) {
                 goto failed;
             }
 

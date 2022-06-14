@@ -953,7 +953,20 @@ if [ $MAIL != NO ]; then
     ngx_module_incs=
 
     if [ $MAIL_SSL = YES ]; then
-        USE_OPENSSL=YES
+        if [ $USE_OPENSSL != DISABLED ]; then
+            USE_OPENSSL=YES
+        elif [ $USE_LIBTLS != DISABLED ]; then
+            USE_LIBTLS=YES
+        else
+cat <<END
+
+$0: error: enable an ssl library with --with-openssl or --with-libtls to use
+the mail ssl module
+
+END
+            exit 1
+        fi
+
         have=NGX_MAIL_SSL . auto/have
 
         ngx_module_name=ngx_mail_ssl_module
@@ -1049,7 +1062,20 @@ if [ $STREAM != NO ]; then
     ngx_module_incs=
 
     if [ $STREAM_SSL = YES ]; then
-        USE_OPENSSL=YES
+        if [ $USE_OPENSSL != DISABLED ]; then
+            USE_OPENSSL=YES
+        elif [ $USE_LIBTLS != DISABLED ]; then
+            USE_LIBTLS=YES
+        else
+cat <<END
+
+$0: error: enable an ssl library with --with-openssl or --with-libtls to use
+the stream ssl module
+
+END
+            exit 1
+        fi
+
         have=NGX_STREAM_SSL . auto/have
 
         ngx_module_name=ngx_stream_ssl_module

@@ -4458,7 +4458,7 @@ ngx_ssl_session_ticket_keys(ngx_conf_t *cf, ngx_ssl_t *ssl, ngx_array_t *paths)
 #endif
 
 
-static void
+void
 ngx_ssl_ctx_cleanup(void *data)
 {
     ngx_ssl_ctx_t  *ctx = data;
